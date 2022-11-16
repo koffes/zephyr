@@ -1,0 +1,55 @@
+# Copyright (c) 2022 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  This file contains specific pin mappings for the nRF5340 Audio DK.
+
+compatible: "nrf5340_audio_dk"
+
+include: base.yaml
+
+properties:
+    hw-codec-in-gpios:
+      type: phandle-array
+      required: true
+      description: GPIO from HW codec
+
+    hw-codec-irq-in-gpios:
+      type: phandle-array
+      required: true
+      description: Interrupt from HW codec
+
+    hw-codec-reset-out-gpios:
+        type: phandle-array
+        required: true
+        description: Reset HW codec
+
+    hw-codec-sel-out-gpios:
+      type: phandle-array
+      required: true
+      description: HW codec selector
+
+    spi-sel-in-gpios:
+      type: phandle-array
+      required: true
+      description: SPI select detect
+
+    pmic-iset-out-gpios:
+      type: phandle-array
+      required: true
+      description: PMIC ISET
+
+    board-id-en-out-gpios:
+      type: phandle-array
+      required: true
+      description: Board rev enable
+
+    board-id-in-gpios:
+      type: phandle-array
+      required: true
+      description: Board rev readback
+
+    curr-mon-alert-in-gpios:
+      type: phandle-array
+      required: true
+      description: Board rev readback

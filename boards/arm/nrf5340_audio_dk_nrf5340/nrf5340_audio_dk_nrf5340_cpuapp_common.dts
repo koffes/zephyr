@@ -116,15 +116,11 @@
 		};
 		slot0_partition: partition@10000 {
 			label = "image-0";
-		};
-		slot0_ns_partition: partition@50000 {
-			label = "image-0-nonsecure";
+			reg = <0x00010000 0x70000>;
 		};
 		slot1_partition: partition@80000 {
 			label = "image-1";
-		};
-		slot1_ns_partition: partition@c0000 {
-			label = "image-1-nonsecure";
+			reg = <0x00080000 0x70000>;
 		};
 		storage_partition: partition@fa000 {
 			label = "storage";
@@ -149,10 +145,6 @@ zephyr_udc0: &usbd {
 
 		sram0_s: image_s@20000000 {
 			/* Secure image memory */
-		};
-
-		sram0_ns: image_ns@20040000 {
-			/* Non-Secure image memory */
 		};
 	};
 };

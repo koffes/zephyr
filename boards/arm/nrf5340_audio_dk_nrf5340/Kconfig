@@ -3,7 +3,7 @@
 # Copyright (c) 2019 Nordic Semiconductor ASA
 # SPDX-License-Identifier: Apache-2.0
 
-if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP || BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP_NS
+if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
 
 config BOARD_ENABLE_DCDC_APP
 	bool "Application MCU DCDC converter"
@@ -29,11 +29,6 @@ config BOARD_ENABLE_CPUNET
 	  as a consequence will power up the Network MCU during system boot.
 	  Additionally, the option allocates GPIO pins that will be used by UARTE
 	  of the Network MCU.
-	  Note: GPIO pin allocation can only be configured by the secure Application
-	  MCU firmware, so when this option is used with the non-secure version of
-	  the board, the application needs to take into consideration, that the
-	  secure firmware image must already have configured GPIO allocation for the
-	  Network MCU.
 	default y if (BT || NRF_802154_SER_HOST)
 
 config DOMAIN_CPUNET_BOARD
@@ -46,7 +41,7 @@ config DOMAIN_CPUNET_BOARD
 	  another board. For example hci_rpmsg on the nRF5340_cpunet for
 	  Bluetooth applications.
 
-endif # BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP || BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP_NS
+endif # BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
 
 config DOMAIN_CPUAPP_BOARD
 	string

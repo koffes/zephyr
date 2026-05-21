@@ -47,6 +47,8 @@ and
 Building for an nrf52840dk
 --------------------------
 
+ west build -b nrf52840dk/nrf52840 --shield adafruit_2_8_tft_touch_v2 --pristine 
+
 .. zephyr-app-commands::
    :zephyr-app: samples/bluetooth/bap_broadcast_assistant/
    :board: nrf52840dk/nrf52840

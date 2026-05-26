@@ -23,13 +23,14 @@
 
 		adafruit_2_8_tft_touch_v2_ili9340: ili9340@0 {
 			compatible = "ilitek,ili9340";
-			mipi-max-frequency = <8000000>;
+			mipi-max-frequency = <16000000>;
 			reg = <0>;
 			width = <240>;
 			height = <320>;
 			pixel-format = <PANEL_PIXEL_FORMAT_RGB_888>;
 			rotation = <90>;
 			h-mirror;
+			red-blue-swap;
 			frmctr1 = [ 00 18  ];
 			pwctrl1 = [ 23 00  ];
 			vmctrl1 = [ 3e 28  ];

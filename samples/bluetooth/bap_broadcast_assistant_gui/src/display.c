@@ -12,6 +12,7 @@
 #include <zephyr/kernel.h>
 
 #include <zephyr/sys/slist.h>
+#include <zephyr/sys/util.h>
 #include <lvgl.h>
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
@@ -35,6 +36,49 @@ static lv_style_t style_btn_default;
 
 static struct brcast_snk_info brcast_snk_info_array[BROADCAST_SINKS_MAX];
 #define TIMEOUT_S 5
+
+/* 320 pixels * 32 bpp (4 bytes/pixel) worst-case line buffer */
+static uint8_t display_clear_line_buf[320 * 4];
+
+static int display_hw_clear_white(const struct device *display_dev)
+{
+	struct display_capabilities caps;
+	struct display_buffer_descriptor desc = {0};
+	uint8_t bytes_per_pixel;
+	size_t line_size;
+
+	display_get_capabilities(display_dev, &caps);
+
+	bytes_per_pixel = DISPLAY_BITS_PER_PIXEL(caps.current_pixel_format) / 8U;
+	if (bytes_per_pixel == 0U || bytes_per_pixel > 4U) {
+		LOG_ERR("Unsupported pixel format: 0x%x", caps.current_pixel_format);
+		return -ENOTSUP;
+	}
+
+	line_size = caps.x_resolution * bytes_per_pixel;
+	if (line_size > sizeof(display_clear_line_buf)) {
+		LOG_ERR("Clear buffer too small for %ux%u", caps.x_resolution, caps.y_resolution);
+		return -ENOMEM;
+	}
+
+	memset(display_clear_line_buf, 0xFF, line_size);
+
+	desc.width = caps.x_resolution;
+	desc.pitch = caps.x_resolution;
+	desc.height = 1U;
+	desc.buf_size = line_size;
+
+	for (uint16_t y = 0U; y < caps.y_resolution; y++) {
+		int err = display_write(display_dev, 0U, y, &desc, display_clear_line_buf);
+
+		if (err != 0) {
+			LOG_ERR("display_write failed on line %u (%d)", y, err);
+			return err;
+		}
+	}
+
+	return 0;
+}
 
 static uint8_t since_seen_string_gen(char *buf, uint32_t since_seen_s)
 {
@@ -81,11 +125,22 @@ static void timer_worker(struct k_work *work)
 		LOG_ERR("Unknown screen active.");
 	}
 
-	lv_task_handler();
 	lv_timer_handler();
 }
 
 K_WORK_DEFINE(timer_work, timer_worker);
+
+static void post_init_repaint_worker(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	lv_obj_invalidate(screen_sinks_scan_run_btn);
+	lv_obj_invalidate(screen_sinks_clear_btn);
+	lv_obj_invalidate(screen_sinks);
+	lv_timer_handler();
+}
+
+K_WORK_DELAYABLE_DEFINE(post_init_repaint_work, post_init_repaint_worker);
 
 static void gui_update_timer_handler(struct k_timer *dummy)
 {
@@ -98,6 +153,7 @@ int display_scan_result_submit(char *name, uint32_t name_len)
 {
 	uint64_t time_now = k_uptime_get();
 	struct brcast_snk_info *brcast_snk_info_loc;
+	size_t copy_len = MIN(name_len, NAME_SIZE_MAX - 1);
 
 	/* Update existing device */
 	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
@@ -114,7 +170,8 @@ int display_scan_result_submit(char *name, uint32_t name_len)
 	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
 		brcast_snk_info_loc = &brcast_snk_info_array[i];
 		if (brcast_snk_info_loc->name[0] == '\0') {
-			memcpy(brcast_snk_info_loc->name, name, name_len);
+			memcpy(brcast_snk_info_loc->name, name, copy_len);
+			brcast_snk_info_loc->name[copy_len] = '\0';
 			brcast_snk_info_loc->last_seen = time_now;
 			brcast_snk_info_loc->update = true;
 			LOG_INF("Added new device: %s", name);
@@ -135,7 +192,8 @@ int display_scan_result_submit(char *name, uint32_t name_len)
 
 	if (oldest_index >= 0) {
 		brcast_snk_info_loc = &brcast_snk_info_array[oldest_index];
-		memcpy(brcast_snk_info_loc->name, name, name_len);
+		memcpy(brcast_snk_info_loc->name, name, copy_len);
+		brcast_snk_info_loc->name[copy_len] = '\0';
 		brcast_snk_info_loc->last_seen = time_now;
 		brcast_snk_info_loc->update = true;
 		LOG_INF("Replaced oldest device: %s", name);
@@ -173,6 +231,17 @@ int display_init(void)
 		return 0;
 	}
 
+	ret = display_blanking_off(display_dev);
+	if (ret < 0 && ret != -ENOSYS) {
+		LOG_ERR("Failed to turn blanking off (error %d)", ret);
+		return 0;
+	}
+
+	ret = display_hw_clear_white(display_dev);
+	if (ret != 0) {
+		LOG_WRN("Hardware clear failed (%d), continuing", ret);
+	}
+
 	screen_sinks = lv_obj_create(NULL);
 	lv_scr_load(screen_sinks);
 
@@ -182,7 +251,6 @@ int display_init(void)
 	lv_obj_t *act_scr = lv_scr_act();
 	lv_obj_add_style(act_scr, &style_common, LV_STATE_DEFAULT);
 
-	lv_task_handler();
 	lv_timer_handler();
 
 	lv_style_set_text_font(&style_common, &lv_font_montserrat_24);
@@ -246,16 +314,8 @@ int display_init(void)
 		//		    (void *)i);
 	}
 
-	lv_timer_handler();
-	lv_task_handler();
-
-	ret = display_blanking_off(display_dev);
-	if (ret < 0 && ret != -ENOSYS) {
-		LOG_ERR("Failed to turn blanking off (error %d)", ret);
-		return 0;
-	}
-
 	k_timer_start(&gui_update_timer, K_MSEC(25), K_MSEC(25));
+	k_work_schedule(&post_init_repaint_work, K_MSEC(150));
 
 	LOG_INF("Display initialized");
 

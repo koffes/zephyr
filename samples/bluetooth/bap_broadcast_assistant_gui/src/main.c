@@ -386,6 +386,10 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 		if (sr_info.has_bass && sr_info.has_pacs) {
 			printk("Broadcast Sink Found:\n");
 			printk("  BT Name:        %s\n", sr_info.bt_name);
+			err = display_scan_result_submit(sr_info.bt_name, strlen(sr_info.bt_name));
+			if (err != 0) {
+				printk("Failed to submit scan result (err %d)\n", err);
+			}
 
 			if (strlen(CONFIG_SELECT_SINK_NAME) > 0U) {
 				/* Compare names with CONFIG_SELECT_SINK_NAME */
@@ -398,21 +402,21 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 				}
 			}
 
-			err = bt_le_scan_stop();
-			if (err != 0) {
-				printk("bt_le_scan_stop failed with %d\n", err);
-			}
+			// err = bt_le_scan_stop();
+			// if (err != 0) {
+			//	printk("bt_le_scan_stop failed with %d\n", err);
+			// }
 
-			printk("Connecting to Broadcast Sink: %s\n", sr_info.bt_name);
+			// printk("Connecting to Broadcast Sink: %s\n", sr_info.bt_name);
 
-			err = bt_conn_le_create(info->addr, BT_CONN_LE_CREATE_CONN,
-						BT_BAP_CONN_PARAM_RELAXED, &broadcast_sink_conn);
-			if (err != 0) {
-				printk("Failed creating connection (err=%u)\n", err);
-				scan_for_broadcast_sink();
-			}
+			// err = bt_conn_le_create(info->addr, BT_CONN_LE_CREATE_CONN,
+			//			BT_BAP_CONN_PARAM_RELAXED, &broadcast_sink_conn);
+			// if (err != 0) {
+			//	printk("Failed creating connection (err=%u)\n", err);
+			//	scan_for_broadcast_sink();
+			// }
 
-			k_sem_give(&sem_sink_discovered);
+			// k_sem_give(&sem_sink_discovered);
 		}
 	}
 }
@@ -704,6 +708,12 @@ int main(void)
 	}
 
 	printk("Bluetooth initialized\n");
+
+	err = display_scan_result_submit("TESSST", strlen("TESSST"));
+	if (err != 0) {
+		printk("Failed to submit scan result (err %d)\n", err);
+		return 0;
+	}
 
 	bt_bap_broadcast_assistant_register_cb(&ba_cbs);
 	bt_le_per_adv_sync_cb_register(&pa_synced_cb);

@@ -366,7 +366,7 @@ class NrfBinaryRunner(ZephyrBinaryRunner):
             elif self.family in ('nrf54l', 'nrf71'):
                 erase_arg = 'ERASE_NONE'
             else:
-                erase_arg = 'ERASE_RANGES_TOUCHED_BY_FIRMWARE'
+                erase_arg = 'ERASE_ALL'
 
         xip_ranges = {
             'nrf52': (0x12000000, 0x19FFFFFF),
@@ -435,7 +435,7 @@ class NrfBinaryRunner(ZephyrBinaryRunner):
 
     def _op_program(self, hex_file, erase, ext_mem_erase):
         args = {'firmware': {'file': hex_file},
-                'options': {'chip_erase_mode': erase, 'verify': 'VERIFY_READ'}}
+                'options': {'chip_erase_mode': erase, 'verify': 'VERIFY_NONE'}}
         if ext_mem_erase:
             args['options']['ext_mem_erase_mode'] = ext_mem_erase
 

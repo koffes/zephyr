@@ -8,7 +8,18 @@
 #define DISPLAY_H_
 
 #include <stdint.h>
+#include <zephyr/sys/slist.h>
 
+#define NAME_SIZE_MAX 30
+
+struct brcast_snk_info {
+	sys_snode_t node;
+	char name[NAME_SIZE_MAX];
+	uint64_t last_seen;
+	bool update;
+};
+
+int display_scan_result_submit(char *name, uint32_t name_len);
 
 /**
  * @brief Initialize the ILI9341 display with LVGL

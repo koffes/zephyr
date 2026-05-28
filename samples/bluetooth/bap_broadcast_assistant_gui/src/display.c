@@ -130,18 +130,6 @@ static void timer_worker(struct k_work *work)
 
 K_WORK_DEFINE(timer_work, timer_worker);
 
-static void post_init_repaint_worker(struct k_work *work)
-{
-	ARG_UNUSED(work);
-
-	lv_obj_invalidate(screen_sinks_scan_run_btn);
-	lv_obj_invalidate(screen_sinks_clear_btn);
-	lv_obj_invalidate(screen_sinks);
-	lv_timer_handler();
-}
-
-K_WORK_DELAYABLE_DEFINE(post_init_repaint_work, post_init_repaint_worker);
-
 static void gui_update_timer_handler(struct k_timer *dummy)
 {
 	k_work_submit(&timer_work);
@@ -314,8 +302,7 @@ int display_init(void)
 		//		    (void *)i);
 	}
 
-	k_timer_start(&gui_update_timer, K_MSEC(25), K_MSEC(25));
-	k_work_schedule(&post_init_repaint_work, K_MSEC(150));
+	k_timer_start(&gui_update_timer, K_MSEC(50), K_MSEC(50));
 
 	LOG_INF("Display initialized");
 

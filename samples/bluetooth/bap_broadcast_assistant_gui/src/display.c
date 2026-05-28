@@ -11,15 +11,15 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/kernel.h>
 
-#include <zephyr/sys/slist.h>
+#include <zephyr/sys/min_heap.h>
 #include <zephyr/sys/util.h>
 #include <lvgl.h>
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(app);
+LOG_MODULE_REGISTER(display);
 
-#define BROADCAST_SINKS_MAX 5
+#define BROADCAST_SINKS_MAX 6
 #define V_OFFSET_PIXELS     30
 
 static lv_obj_t *screen_sinks;
@@ -34,7 +34,24 @@ static lv_obj_t *screen_sinks_clear_btn;
 static lv_style_t style_btn_trans;
 static lv_style_t style_btn_default;
 
-static struct brcast_snk_info brcast_snk_info_array[BROADCAST_SINKS_MAX];
+static int brcast_snk_name_cmp(const void *a, const void *b)
+{
+	const struct brcast_snk_info *lhs = a;
+	const struct brcast_snk_info *rhs = b;
+
+	return strcmp(lhs->name, rhs->name);
+}
+
+static bool brcast_snk_name_match(const void *node, const void *other)
+{
+	const struct brcast_snk_info *sink = node;
+	const char *name = other;
+
+	return strcmp(sink->name, name) == 0;
+}
+
+MIN_HEAP_DEFINE_STATIC(brcast_snk_heap, BROADCAST_SINKS_MAX, sizeof(struct brcast_snk_info),
+		       __alignof__(struct brcast_snk_info), brcast_snk_name_cmp);
 #define TIMEOUT_S 5
 
 /* 320 pixels * 32 bpp (4 bytes/pixel) worst-case line buffer */
@@ -95,25 +112,23 @@ static uint8_t since_seen_string_gen(char *buf, uint32_t since_seen_s)
 
 static void page_sinks_draw(void)
 {
-	struct brcast_snk_info *bc_snk_info_loc;
+	struct brcast_snk_info *sink;
+	int row = 0;
 
-	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
-		bc_snk_info_loc = &brcast_snk_info_array[i];
-		if (!bc_snk_info_loc->update) {
-			return;
-		}
-		if (bc_snk_info_loc->name[0] != '\0') {
-			lv_label_set_text(screen_sinks_name[i], bc_snk_info_loc->name);
-			char last_seen_buf[32];
-			since_seen_string_gen(
-				last_seen_buf,
-				(uint32_t)(k_uptime_get() - bc_snk_info_loc->last_seen) / 1000);
-			lv_label_set_text(screen_sinks_since_seen[i], last_seen_buf);
+	MIN_HEAP_FOREACH(&brcast_snk_heap, sink) {
 
-		} else {
-			lv_label_set_text(screen_sinks_name[i], "--");
-			lv_label_set_text(screen_sinks_since_seen[i], "--");
-		}
+		// LOG_WRN_RATELIMIT("name: %s, last_seen: %lld", sink->name, sink->last_seen);
+		char last_seen_buf[20];
+		since_seen_string_gen(last_seen_buf,
+				      (uint32_t)(k_uptime_get() - sink->last_seen) / 1000);
+		lv_label_set_text(screen_sinks_since_seen[row], last_seen_buf);
+		lv_label_set_text(screen_sinks_name[row], sink->name);
+		row++;
+	}
+
+	for (; row < BROADCAST_SINKS_MAX; row++) {
+		lv_label_set_text(screen_sinks_name[row], "----------");
+		lv_label_set_text(screen_sinks_since_seen[row], "------");
 	}
 }
 
@@ -141,55 +156,58 @@ int display_scan_result_submit(char *name, uint32_t name_len)
 {
 	uint64_t time_now = k_uptime_get();
 	struct brcast_snk_info *brcast_snk_info_loc;
+	struct brcast_snk_info new_item = {0};
+	struct brcast_snk_info removed_item;
+	size_t found_idx = 0U;
 	size_t copy_len = MIN(name_len, NAME_SIZE_MAX - 1);
+	int ret;
 
 	/* Update existing device */
-	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
-		brcast_snk_info_loc = &brcast_snk_info_array[i];
-		if (strcmp(name, brcast_snk_info_loc->name) == 0) {
-			brcast_snk_info_loc->last_seen = time_now;
-			brcast_snk_info_loc->update = true;
-			LOG_INF("Updated existing device: %s", name);
-			return 0;
-		}
-	}
-
-	/* Add new device */
-	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
-		brcast_snk_info_loc = &brcast_snk_info_array[i];
-		if (brcast_snk_info_loc->name[0] == '\0') {
-			memcpy(brcast_snk_info_loc->name, name, copy_len);
-			brcast_snk_info_loc->name[copy_len] = '\0';
-			brcast_snk_info_loc->last_seen = time_now;
-			brcast_snk_info_loc->update = true;
-			LOG_INF("Added new device: %s", name);
-			return 0;
-		}
-	}
-
-	/* No available slot for new device. Remove oldest */
-	uint64_t oldest_time = UINT64_MAX;
-	int oldest_index = -1;
-	for (int i = 0; i < BROADCAST_SINKS_MAX; i++) {
-		brcast_snk_info_loc = &brcast_snk_info_array[i];
-		if (brcast_snk_info_loc->last_seen < oldest_time) {
-			oldest_time = brcast_snk_info_loc->last_seen;
-			oldest_index = i;
-		}
-	}
-
-	if (oldest_index >= 0) {
-		brcast_snk_info_loc = &brcast_snk_info_array[oldest_index];
-		memcpy(brcast_snk_info_loc->name, name, copy_len);
-		brcast_snk_info_loc->name[copy_len] = '\0';
+	brcast_snk_info_loc =
+		min_heap_find(&brcast_snk_heap, brcast_snk_name_match, name, &found_idx);
+	if (brcast_snk_info_loc != NULL) {
 		brcast_snk_info_loc->last_seen = time_now;
 		brcast_snk_info_loc->update = true;
-		LOG_INF("Replaced oldest device: %s", name);
-	} else {
-		LOG_ERR("No available slot for new device: %s", name);
+		LOG_INF("Updated existing device: %s", name);
+		return 0;
 	}
 
-	return 0;
+	memcpy(new_item.name, name, copy_len);
+	new_item.name[copy_len] = '\0';
+	new_item.last_seen = time_now;
+	new_item.update = true;
+
+	ret = min_heap_push(&brcast_snk_heap, &new_item);
+	if (ret == 0) {
+		LOG_INF("Added new device: %s", name);
+		return 0;
+	}
+
+	/* Heap full: remove oldest seen sink and insert the new one */
+	if (brcast_snk_heap.size > 0U) {
+		size_t oldest_idx = 0U;
+		uint64_t oldest_time = UINT64_MAX;
+
+		for (size_t i = 0U; i < brcast_snk_heap.size; i++) {
+			brcast_snk_info_loc = min_heap_get_element(&brcast_snk_heap, i);
+			if (brcast_snk_info_loc->last_seen < oldest_time) {
+				oldest_time = brcast_snk_info_loc->last_seen;
+				oldest_idx = i;
+			}
+		}
+
+		if (min_heap_remove(&brcast_snk_heap, oldest_idx, &removed_item) &&
+		    min_heap_push(&brcast_snk_heap, &new_item) == 0) {
+			LOG_INF("Replaced oldest device: %s", name);
+			return 0;
+		}
+
+		LOG_ERR("Failed to replace oldest device: %s", name);
+		return -ENOMEM;
+	} else {
+		LOG_ERR("No available slot for new device: %s", name);
+		return -ENOENT;
+	}
 }
 
 static void btn_sink_select(lv_event_t *event)
@@ -200,7 +218,12 @@ static void btn_sink_select(lv_event_t *event)
 
 static void btn_clear(lv_event_t *event)
 {
-	LOG_INF("Clear event:");
+	struct brcast_snk_info removed_item;
+
+	while (min_heap_pop(&brcast_snk_heap, &removed_item)) {
+	}
+
+	LOG_INF("Clear event: all items removed");
 }
 
 static void btn_scan(lv_event_t *event)
@@ -212,6 +235,8 @@ int display_init(void)
 {
 	const struct device *display_dev;
 	int ret;
+
+	brcast_snk_heap.size = 0U;
 
 	display_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 	if (!device_is_ready(display_dev)) {
@@ -229,6 +254,8 @@ int display_init(void)
 	if (ret != 0) {
 		LOG_WRN("Hardware clear failed (%d), continuing", ret);
 	}
+
+	k_sleep(K_MSEC(500));
 
 	screen_sinks = lv_obj_create(NULL);
 	lv_scr_load(screen_sinks);
@@ -294,15 +321,15 @@ int display_init(void)
 		lv_obj_add_style(screen_sinks_since_seen[i], &style_common, 0);
 		lv_label_set_text(screen_sinks_since_seen[i], "-");
 
-		// screen_sinks_btn[i] = lv_btn_create(screen_sinks);
-		// lv_obj_set_pos(screen_sinks_btn[i], 0, i * V_OFFSET_PIXELS + V_OFFSET_PIXELS);
-		// lv_obj_set_size(screen_sinks_btn[i], width, V_OFFSET_PIXELS);
-		// lv_obj_add_style(screen_sinks_btn[i], &style_btn_trans, LV_STATE_DEFAULT);
-		// lv_obj_add_event_cb(screen_sinks_btn[i], btn_sink_select, LV_EVENT_PRESSED,
-		//		    (void *)i);
+		screen_sinks_btn[i] = lv_btn_create(screen_sinks);
+		lv_obj_set_pos(screen_sinks_btn[i], 0, i * V_OFFSET_PIXELS + V_OFFSET_PIXELS);
+		lv_obj_set_size(screen_sinks_btn[i], width, V_OFFSET_PIXELS);
+		lv_obj_add_style(screen_sinks_btn[i], &style_btn_trans, LV_STATE_DEFAULT);
+		lv_obj_add_event_cb(screen_sinks_btn[i], btn_sink_select, LV_EVENT_PRESSED,
+				    (void *)i);
 	}
 
-	k_timer_start(&gui_update_timer, K_MSEC(50), K_MSEC(50));
+	k_timer_start(&gui_update_timer, K_MSEC(100), K_MSEC(100));
 
 	LOG_INF("Display initialized");
 

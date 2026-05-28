@@ -6,6 +6,9 @@ tests:
     harness: bluetooth
     platform_allow:
       - nrf52840dk/nrf52840
+      - nrf5340dk/nrf5340/cpuapp
     integration_platforms:
       - nrf52840dk/nrf52840
+      - nrf5340dk/nrf5340/cpuapp
     tags: bluetooth
+    sysbuild: true

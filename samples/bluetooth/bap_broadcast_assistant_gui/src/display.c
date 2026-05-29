@@ -126,16 +126,13 @@ static void page_sinks_draw(void)
 		since_seen_string_gen(buf, (uint32_t)(k_uptime_get() - sink->last_seen) / 1000);
 		lv_label_set_text(screen_sinks_since_seen[row], buf);
 		lv_label_set_text(screen_sinks_name[row], sink->name);
-		LOG_INF("Row %d: name: %s, last_seen: %s", row, sink->name, buf);
 		row++;
 	}
 
 	for (; row < BROADCAST_SINKS_MAX; row++) {
-		sprintf(buf, "a----%d", row);
+		sprintf(buf, "%d -------.", row);
 		lv_label_set_text(screen_sinks_name[row], buf);
-		sprintf(buf, "b-------%d", row);
 		lv_label_set_text(screen_sinks_since_seen[row], buf);
-		LOG_INF("Row %d: name: %s, last_seen: %s", row, "-----------", "---------");
 	}
 }
 
@@ -245,6 +242,12 @@ static void btn_scan(lv_event_t *event)
 	LOG_INF("Scan start/stop event:");
 }
 
+int display_state_set(enum display_state new_state)
+{
+
+	return 0;
+}
+
 int display_init(void)
 {
 	const struct device *display_dev;
@@ -312,7 +315,6 @@ int display_init(void)
 			     (i * V_OFFSET_PIXELS) + V_OFFSET_PIXELS);
 
 		lv_obj_add_style(screen_sinks_name[i], &style_common, 0);
-		lv_label_set_long_mode(screen_sinks_name[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
 		lv_label_set_text(screen_sinks_name[i], "-");
 
 		screen_sinks_since_seen[i] = lv_label_create(screen_sinks);
@@ -334,6 +336,19 @@ int display_init(void)
 	lv_obj_set_style_text_color(scan_label, lv_color_black(), LV_PART_MAIN | LV_STATE_DEFAULT);
 	lv_obj_align(scan_label, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_add_event_cb(screen_sinks_scan_run_btn, btn_scan, LV_EVENT_PRESSED, NULL);
+
+	// screen_sinks_status_label = lv_label_create(screen_sinks);
+	// lv_obj_set_width(screen_sinks_status_label,
+	// 		 width - (2 * TOP_BTN_WIDTH) - (2 * TOP_STATUS_PAD));
+	// lv_obj_align(screen_sinks_status_label, LV_ALIGN_TOP_LEFT, TOP_BTN_WIDTH +
+	// TOP_STATUS_PAD, 	     0); lv_obj_set_height(screen_sinks_status_label,
+	// V_OFFSET_PIXELS); lv_obj_set_style_text_align(screen_sinks_status_label,
+	// LV_TEXT_ALIGN_CENTER, 			    LV_PART_MAIN | LV_STATE_DEFAULT);
+	// lv_obj_set_style_text_color(screen_sinks_status_label, lv_color_black(),
+	// 			    LV_PART_MAIN | LV_STATE_DEFAULT);
+	// lv_obj_set_style_bg_opa(screen_sinks_status_label, LV_OPA_TRANSP,
+	// 			LV_PART_MAIN | LV_STATE_DEFAULT);
+	// lv_label_set_text(screen_sinks_status_label, "Status: Idle");
 
 	screen_sinks_clear_btn = lv_btn_create(screen_sinks);
 	lv_obj_set_size(screen_sinks_clear_btn, 100, V_OFFSET_PIXELS);

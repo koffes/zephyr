@@ -19,6 +19,15 @@ struct brcast_snk_info {
 	bool update;
 };
 
+enum display_state {
+	STATE_IDLE,
+	STATE_SCANNING_FOR_SINK,
+	STATE_CONNECTING_TO_SINK,
+	STATE_CONNECTED_TO_SINK,
+};
+
+int display_state_set(enum display_state new_state);
+
 int display_scan_result_submit(char *name, uint32_t name_len);
 
 /**

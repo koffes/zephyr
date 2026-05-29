@@ -39,6 +39,8 @@ int main(void)
 		return 0;
 	}
 
+	LOG_INF("Broadcast Assistant started");
+
 	err = display_scan_result_submit("TESSST", strlen("TESSST"));
 	if (err != 0) {
 		LOG_DBG("Failed to submit scan result (err %d)\n", err);
@@ -53,6 +55,14 @@ int main(void)
 
 	err = bt_ba_scan_for_sink_start();
 	if (err != 0) {
-		LOG_DBG("Failed to start scan (err %d)\n", err);
+		LOG_ERR("Failed to start scan (err %d)\n", err);
+	} else {
+		display_state_set(STATE_SCANNING_FOR_SINK);
+	}
+
+	LOG_INF("Scan for sink started");
+
+	while (1) {
+		k_sleep(K_SECONDS(1));
 	}
 }

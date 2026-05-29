@@ -45,8 +45,6 @@ LOG_MODULE_REGISTER(bt_ba);
 /* Default semaphore timeout when waiting for an action */
 #define SEM_TIMEOUT                       K_FOREVER
 
-static void scan_for_broadcast_sink(void);
-
 /* Struct to collect information from scanning
  * for Broadcast Source or Sink
  */
@@ -73,7 +71,6 @@ static bool scanning_for_broadcast_source;
 
 static struct k_mutex base_store_mutex;
 static K_SEM_DEFINE(sem_source_discovered, 0U, 1U);
-static K_SEM_DEFINE(sem_sink_discovered, 0U, 1U);
 static K_SEM_DEFINE(sem_sink_connected, 0U, 1U);
 static K_SEM_DEFINE(sem_sink_disconnected, 0U, 1U);
 static K_SEM_DEFINE(sem_security_updated, 0U, 1U);
@@ -397,8 +394,8 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 		bt_data_parse(ad, device_found, (void *)&sr_info);
 
 		if (sr_info.has_bass && sr_info.has_pacs) {
-			LOG_DBG("Broadcast Sink Found:\n");
-			LOG_DBG("  BT Name:        %s\n", sr_info.bt_name);
+			// LOG_INF("Broadcast Sink Found:\n");
+			LOG_INF_RATELIMIT("  BT Name:        %s\n", sr_info.bt_name);
 			// err = display_scan_result_submit(sr_info.bt_name,
 			// strlen(sr_info.bt_name)); if (err != 0) { 	LOG_DBG("Failed to submit
 			// scan
@@ -447,7 +444,7 @@ static void scan_for_broadcast_source(void)
 	__ASSERT_NO_MSG(err == 0);
 }
 
-static void scan_for_broadcast_sink(void)
+static int scan_for_broadcast_sink(void)
 {
 	int err;
 
@@ -455,14 +452,11 @@ static void scan_for_broadcast_sink(void)
 
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, NULL);
 	if (err != 0) {
-		LOG_DBG("Scanning failed to start (err %d)\n", err);
-		return;
+		LOG_WRN("Scanning failed to start (err %d)\n", err);
+		return err;
 	}
 
 	LOG_DBG("Scanning for Broadcast Sink successfully started\n");
-
-	err = k_sem_take(&sem_sink_discovered, K_FOREVER);
-	__ASSERT_NO_MSG(err == 0);
 }
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -646,7 +640,6 @@ static void reset(void)
 	(void)memset(&selected_addr, 0, sizeof(selected_addr));
 
 	k_sem_reset(&sem_source_discovered);
-	k_sem_reset(&sem_sink_discovered);
 	k_sem_reset(&sem_sink_connected);
 	k_sem_reset(&sem_sink_disconnected);
 	k_sem_reset(&sem_security_updated);
@@ -704,8 +697,6 @@ int bt_ba_sink_connect(const bt_addr_le_t *addr)
 		LOG_DBG("Failed creating connection (err=%u)\n", err);
 		scan_for_broadcast_sink();
 	}
-
-	k_sem_give(&sem_sink_discovered);
 }
 
 int bt_ba_scan_for_sink_start(void)
@@ -731,103 +722,103 @@ int bt_ba_init(void)
 
 	reset();
 
-	while (true) {
-		struct bt_bap_broadcast_assistant_add_src_param param = {0};
+	// while (true) {
+	// 	struct bt_bap_broadcast_assistant_add_src_param param = {0};
 
-		err = k_sem_take(&sem_sink_connected, SEM_TIMEOUT);
-		if (err != 0) {
-			LOG_DBG("Failed to take sem_sink_connected (err %d)\n", err);
-			continue;
-		}
+	// 	err = k_sem_take(&sem_sink_connected, SEM_TIMEOUT);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to take sem_sink_connected (err %d)\n", err);
+	// 		continue;
+	// 	}
 
-		err = bt_conn_set_security(broadcast_sink_conn, BT_SECURITY_L2);
-		if (err != 0) {
-			LOG_DBG("Failed to set security: %d\n", err);
-			continue;
-		}
+	// 	err = bt_conn_set_security(broadcast_sink_conn, BT_SECURITY_L2);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to set security: %d\n", err);
+	// 		continue;
+	// 	}
 
-		err = k_sem_take(&sem_security_updated, SEM_TIMEOUT);
-		if (err != 0) {
-			LOG_DBG("Failed to take sem_security_updated (err %d)\n", err);
-			continue;
-		}
+	// 	err = k_sem_take(&sem_security_updated, SEM_TIMEOUT);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to take sem_security_updated (err %d)\n", err);
+	// 		continue;
+	// 	}
 
-		err = bt_bap_broadcast_assistant_discover(broadcast_sink_conn);
-		if (err != 0) {
-			LOG_DBG("Failed to discover BASS on the sink (err %d)\n", err);
-			continue;
-		}
+	// 	err = bt_bap_broadcast_assistant_discover(broadcast_sink_conn);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to discover BASS on the sink (err %d)\n", err);
+	// 		continue;
+	// 	}
 
-		err = k_sem_take(&sem_bass_discovered, SEM_TIMEOUT);
-		if (err != 0) {
-			LOG_DBG("Failed to take sem_bass_discovered (err %d)\n", err);
-			continue;
-		}
+	// 	err = k_sem_take(&sem_bass_discovered, SEM_TIMEOUT);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to take sem_bass_discovered (err %d)\n", err);
+	// 		continue;
+	// 	}
 
-		err = read_recv_states();
-		if (err != 0) {
-			LOG_DBG("Failed to read receive states\n");
-			continue;
-		}
+	// 	err = read_recv_states();
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to read receive states\n");
+	// 		continue;
+	// 	}
 
-		/* TODO: Discover and parse the PACS on the sink and use the information
-		 * when discovering and adding a source to the sink.
-		 * Also, before populating the parameters to sync to the broadcast source
-		 * first, parse the source BASE and determine if the sink supports the
-		 * source. If not, then look for another source.
-		 */
+	// 	/* TODO: Discover and parse the PACS on the sink and use the information
+	// 	 * when discovering and adding a source to the sink.
+	// 	 * Also, before populating the parameters to sync to the broadcast source
+	// 	 * first, parse the source BASE and determine if the sink supports the
+	// 	 * source. If not, then look for another source.
+	// 	 */
 
-		scan_for_broadcast_source();
+	// 	scan_for_broadcast_source();
 
-		LOG_DBG("Attempting to PA sync to the broadcaster with id 0x%06X\n",
-			selected_broadcast_id);
-		err = pa_sync_create();
-		if (err != 0) {
-			LOG_DBG("Could not create Broadcast PA sync: %d\n", err);
-			continue;
-		}
+	// 	LOG_DBG("Attempting to PA sync to the broadcaster with id 0x%06X\n",
+	// 		selected_broadcast_id);
+	// 	err = pa_sync_create();
+	// 	if (err != 0) {
+	// 		LOG_DBG("Could not create Broadcast PA sync: %d\n", err);
+	// 		continue;
+	// 	}
 
-		LOG_DBG("Waiting for PA synced\n");
-		err = k_sem_take(&sem_pa_synced, SEM_TIMEOUT);
-		if (err != 0) {
-			LOG_DBG("Failed to take sem_pa_synced (err %d)\n", err);
-			continue;
-		}
+	// 	LOG_DBG("Waiting for PA synced\n");
+	// 	err = k_sem_take(&sem_pa_synced, SEM_TIMEOUT);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to take sem_pa_synced (err %d)\n", err);
+	// 		continue;
+	// 	}
 
-		memset(bass_subgroups, 0, sizeof(bass_subgroups));
-		bt_addr_le_copy(&param.addr, &selected_addr);
-		param.adv_sid = selected_sid;
-		param.pa_interval = selected_pa_interval;
-		param.broadcast_id = selected_broadcast_id;
-		param.pa_sync = true;
-		param.subgroups = bass_subgroups;
+	// 	memset(bass_subgroups, 0, sizeof(bass_subgroups));
+	// 	bt_addr_le_copy(&param.addr, &selected_addr);
+	// 	param.adv_sid = selected_sid;
+	// 	param.pa_interval = selected_pa_interval;
+	// 	param.broadcast_id = selected_broadcast_id;
+	// 	param.pa_sync = true;
+	// 	param.subgroups = bass_subgroups;
 
-		/* Wait to receive subgroups */
-		err = k_sem_take(&sem_received_base_subgroups, K_FOREVER);
-		__ASSERT_NO_MSG(err == 0);
+	// 	/* Wait to receive subgroups */
+	// 	err = k_sem_take(&sem_received_base_subgroups, K_FOREVER);
+	// 	__ASSERT_NO_MSG(err == 0);
 
-		err = k_mutex_lock(&base_store_mutex, K_FOREVER);
-		__ASSERT_NO_MSG(err == 0);
-		err = bt_bap_base_foreach_subgroup((const struct bt_bap_base *)received_base,
-						   add_pa_sync_base_subgroup_cb, &param);
-		err = k_mutex_unlock(&base_store_mutex);
-		__ASSERT_NO_MSG(err == 0);
+	// 	err = k_mutex_lock(&base_store_mutex, K_FOREVER);
+	// 	__ASSERT_NO_MSG(err == 0);
+	// 	err = bt_bap_base_foreach_subgroup((const struct bt_bap_base *)received_base,
+	// 					   add_pa_sync_base_subgroup_cb, &param);
+	// 	err = k_mutex_unlock(&base_store_mutex);
+	// 	__ASSERT_NO_MSG(err == 0);
 
-		if (err != 0) {
-			LOG_DBG("Could not add BASE to params %d\n", err);
-			continue;
-		}
+	// 	if (err != 0) {
+	// 		LOG_DBG("Could not add BASE to params %d\n", err);
+	// 		continue;
+	// 	}
 
-		err = bt_bap_broadcast_assistant_add_src(broadcast_sink_conn, &param);
-		if (err != 0) {
-			LOG_DBG("Failed to add source: %d\n", err);
-			continue;
-		}
+	// 	err = bt_bap_broadcast_assistant_add_src(broadcast_sink_conn, &param);
+	// 	if (err != 0) {
+	// 		LOG_DBG("Failed to add source: %d\n", err);
+	// 		continue;
+	// 	}
 
-		/* Reset if the sink disconnects */
-		err = k_sem_take(&sem_sink_disconnected, K_FOREVER);
-		__ASSERT_NO_MSG(err == 0);
-	}
+	// 	/* Reset if the sink disconnects */
+	// 	err = k_sem_take(&sem_sink_disconnected, K_FOREVER);
+	// 	__ASSERT_NO_MSG(err == 0);
+	// }
 
 	return 0;
 }

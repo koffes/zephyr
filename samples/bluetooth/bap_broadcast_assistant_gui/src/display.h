@@ -26,7 +26,7 @@ enum display_state {
 	STATE_CONNECTED_TO_SINK,
 };
 
-int display_state_set(enum display_state new_state);
+void display_state_set(enum display_state new_state);
 
 int display_scan_result_submit(char *name, uint32_t name_len);
 

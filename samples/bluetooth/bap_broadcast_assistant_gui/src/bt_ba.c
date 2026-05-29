@@ -38,23 +38,11 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bt_ba);
 
-#define NAME_LEN                          30U
 #define PA_SYNC_SKIP                      5U
 #define PA_SYNC_INTERVAL_TO_TIMEOUT_RATIO 20U /* Set the timeout relative to interval */
 /* Broadcast IDs are 24bit, so this is out of valid range */
 /* Default semaphore timeout when waiting for an action */
 #define SEM_TIMEOUT                       K_FOREVER
-
-/* Struct to collect information from scanning
- * for Broadcast Source or Sink
- */
-struct scan_recv_info {
-	char bt_name[NAME_LEN];
-	char broadcast_name[NAME_LEN];
-	uint32_t broadcast_id;
-	bool has_bass;
-	bool has_pacs;
-};
 
 static struct bt_conn *broadcast_sink_conn;
 static uint8_t remote_recv_state_count;
@@ -68,6 +56,7 @@ static size_t received_base_size;
 static struct bt_bap_bass_subgroup bass_subgroups[CONFIG_BT_BAP_BASS_MAX_SUBGROUPS];
 
 static bool scanning_for_broadcast_source;
+static struct bt_ba_callbacks app_callbacks;
 
 static struct k_mutex base_store_mutex;
 static K_SEM_DEFINE(sem_source_discovered, 0U, 1U);
@@ -345,6 +334,8 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 			LOG_DBG("  Broadcast Name: %s\n", sr_info.broadcast_name);
 			LOG_DBG("  Broadcast ID:   0x%06x\n\n", sr_info.broadcast_id);
 
+			app_callbacks.scan_result_source(sr_info);
+
 #if defined(CONFIG_SELECT_SOURCE_NAME)
 			if (strlen(CONFIG_SELECT_SOURCE_NAME) > 0U) {
 				/* Compare names with CONFIG_SELECT_SOURCE_NAME */
@@ -396,22 +387,8 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 		if (sr_info.has_bass && sr_info.has_pacs) {
 			// LOG_INF("Broadcast Sink Found:\n");
 			LOG_INF_RATELIMIT("  BT Name:        %s\n", sr_info.bt_name);
-			// err = display_scan_result_submit(sr_info.bt_name,
-			// strlen(sr_info.bt_name)); if (err != 0) { 	LOG_DBG("Failed to submit
-			// scan
-			// result (err %d)\n", err);
-			// }
 
-			if (strlen(CONFIG_SELECT_SINK_NAME) > 0U) {
-				/* Compare names with CONFIG_SELECT_SINK_NAME */
-				if (is_substring(CONFIG_SELECT_SINK_NAME, sr_info.bt_name)) {
-					LOG_DBG("Match found for '%s'\n", CONFIG_SELECT_SINK_NAME);
-				} else {
-					LOG_DBG("'%s' not found in names\n\n",
-						CONFIG_SELECT_SINK_NAME);
-					return;
-				}
-			}
+			app_callbacks.scan_result_sink(sr_info);
 		}
 	}
 }
@@ -704,9 +681,15 @@ int bt_ba_scan_for_sink_start(void)
 	scan_for_broadcast_sink();
 }
 
-int bt_ba_init(void)
+int bt_ba_init(const struct bt_ba_callbacks *callbacks)
 {
 	int err;
+
+	if (callbacks != NULL) {
+		app_callbacks = *callbacks;
+	} else {
+		(void)memset(&app_callbacks, 0, sizeof(app_callbacks));
+	}
 
 	err = bt_enable(NULL);
 	if (err != 0) {

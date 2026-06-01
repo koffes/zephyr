@@ -38,6 +38,7 @@ static lv_obj_t *screen_all_status_label;
 
 static lv_style_t style_btn_trans;
 static lv_style_t style_btn_default;
+static struct display_callbacks app_callbacks;
 
 static int brcast_snk_name_cmp(const void *a, const void *b)
 {
@@ -135,8 +136,10 @@ static void page_sinks_draw(void)
 	}
 
 	for (; row < BROADCAST_SINKS_MAX; row++) {
-		sprintf(buf, "%d -------.", row);
+		sprintf(buf, "----------------");
 		lv_label_set_text(screen_sinks_name[row], buf);
+		sprintf(buf, "------");
+
 		lv_label_set_text(screen_sinks_since_seen[row], buf);
 	}
 }
@@ -185,7 +188,7 @@ int display_scan_result_submit(struct brcast_snk_info sink_info)
 	if (brcast_snk_info_loc != NULL) {
 		brcast_snk_info_loc->last_seen = time_now;
 		brcast_snk_info_loc->update = true;
-		LOG_INF("Updated existing device: %s", sink_info.name);
+		LOG_DBG("Updated existing device: %s", sink_info.name);
 		return 0;
 	}
 
@@ -222,33 +225,52 @@ int display_scan_result_submit(struct brcast_snk_info sink_info)
 	}
 }
 
+static const struct brcast_snk_info *sink_from_button_index(uint8_t sink_index)
+{
+	if (sink_index >= brcast_snk_heap.size) {
+		return NULL;
+	}
+
+	return min_heap_get_element(&brcast_snk_heap, sink_index);
+}
+
 static void btn_sink_select(lv_event_t *event)
 {
-	// uint32_t device = (uint32_t)event->user_data;
-	LOG_INF("Button event:");
+	int device = (int)(uintptr_t)lv_event_get_user_data(event);
+	const struct brcast_snk_info *sink_info = sink_from_button_index((uint8_t)device);
+	LOG_INF("Button event: %d", device);
+
+	app_callbacks.sink_selected(sink_info);
 }
 
 static void btn_clear(lv_event_t *event)
 {
 	struct brcast_snk_info removed_item;
+	ARG_UNUSED(event);
 
 	while (min_heap_pop(&brcast_snk_heap, &removed_item)) {
 	}
 
-	if (screen_all_status_label != NULL) {
-		lv_label_set_text(screen_all_status_label, "Cleared");
-	}
-
 	LOG_INF("Clear event: all items removed");
+
+	if (app_callbacks.clear_pressed != NULL) {
+		app_callbacks.clear_pressed();
+	}
 }
 
 static void btn_scan(lv_event_t *event)
 {
+	ARG_UNUSED(event);
+
 	if (screen_all_status_label != NULL) {
 		lv_label_set_text(screen_all_status_label, "Scanning");
 	}
 
 	LOG_INF("Scan start/stop event:");
+
+	if (app_callbacks.scan_pressed != NULL) {
+		app_callbacks.scan_pressed();
+	}
 }
 
 void display_state_set(enum ba_states new_state)
@@ -270,10 +292,16 @@ void display_state_set(enum ba_states new_state)
 	return;
 }
 
-int display_init(void)
+int display_init(const struct display_callbacks *callbacks)
 {
 	const struct device *display_dev;
 	int ret;
+
+	if (callbacks != NULL) {
+		app_callbacks = *callbacks;
+	} else {
+		(void)memset(&app_callbacks, 0, sizeof(app_callbacks));
+	}
 
 	brcast_snk_heap.size = 0U;
 
@@ -329,7 +357,7 @@ int display_init(void)
 		lv_obj_add_style(screen_sinks_btn[i], &style_btn_trans,
 				 LV_PART_MAIN | LV_STATE_DEFAULT);
 		lv_obj_add_event_cb(screen_sinks_btn[i], btn_sink_select, LV_EVENT_PRESSED,
-				    (void *)i);
+				    (void *)(uintptr_t)i);
 
 		screen_sinks_name[i] = lv_label_create(screen_sinks);
 		lv_label_set_recolor(screen_sinks_name[i], true);
@@ -361,7 +389,7 @@ int display_init(void)
 
 	screen_all_status_label = lv_label_create(screen_sinks);
 	lv_obj_set_size(screen_all_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
-	lv_obj_align(screen_all_status_label, LV_ALIGN_TOP_MID, 0, 0);
+	lv_obj_align(screen_all_status_label, LV_ALIGN_TOP_MID, 3, 0);
 	lv_obj_set_style_text_font(screen_all_status_label, &lv_font_montserrat_24,
 				   LV_PART_MAIN | LV_STATE_DEFAULT);
 	lv_obj_set_style_text_align(screen_all_status_label, LV_TEXT_ALIGN_CENTER,
@@ -376,7 +404,7 @@ int display_init(void)
 
 	screen_sinks_clear_btn = lv_btn_create(screen_sinks);
 	lv_obj_set_size(screen_sinks_clear_btn, TOP_BUTTON_WIDTH, V_OFFSET_PIXELS);
-	lv_obj_align(screen_sinks_clear_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
+	lv_obj_align(screen_sinks_clear_btn, LV_ALIGN_TOP_RIGHT, -1, 1);
 	lv_obj_add_style(screen_sinks_clear_btn, &style_btn_default,
 			 LV_PART_MAIN | LV_STATE_DEFAULT);
 	lv_obj_move_foreground(screen_sinks_clear_btn);

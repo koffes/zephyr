@@ -9,6 +9,32 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main);
 
+static void on_sink_button_pressed(const struct brcast_snk_info *sink_info)
+{
+	int err;
+	if (sink_info == NULL) {
+		LOG_WRN("Sink button pressed for empty row");
+		return;
+	}
+
+	LOG_INF("Sink selected: %s", sink_info->name);
+
+	err = bt_ba_sink_connect(sink_info);
+	if (err != 0) {
+		LOG_ERR("Failed to connect to sink (err %d)\n", err);
+	}
+}
+
+static void on_scan_button_pressed(void)
+{
+	LOG_INF("Scan button pressed");
+}
+
+static void on_clear_button_pressed(void)
+{
+	LOG_INF("Clear button pressed");
+}
+
 static void on_scan_result_sink(struct brcast_snk_info snk_inf)
 {
 	int ret;
@@ -44,11 +70,16 @@ int main(void)
 		.scan_result_sink = on_scan_result_sink,
 		.scan_result_source = on_scan_result_source,
 	};
+	const struct display_callbacks display_callbacks = {
+		.sink_selected = on_sink_button_pressed,
+		.scan_pressed = on_scan_button_pressed,
+		.clear_pressed = on_clear_button_pressed,
+	};
 
 	set_cpu_to_128mhz();
 
 	/* Initialize display */
-	err = display_init();
+	err = display_init(&display_callbacks);
 	if (err != 0) {
 		LOG_DBG("Display init failed (err %d)\n", err);
 		return 0;

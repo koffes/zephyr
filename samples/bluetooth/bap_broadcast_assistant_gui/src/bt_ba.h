@@ -11,6 +11,10 @@ struct bt_ba_callbacks {
 	void (*scan_result_source)(const struct brcast_src_info info);
 };
 
+int bt_ba_sink_connect(const struct brcast_snk_info *info);
+
+int bt_ba_scan_stop(void);
+
 int bt_ba_scan_for_sink_start(void);
 
 int bt_ba_init(const struct bt_ba_callbacks *callbacks);

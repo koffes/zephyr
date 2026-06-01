@@ -450,7 +450,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		return;
 	}
 
-	LOG_DBG("Connected: %s\n", bt_conn_dst_str(conn));
+	LOG_INF("Connected: %s\n", bt_conn_dst_str(conn));
 	k_sem_give(&sem_sink_connected);
 }
 
@@ -651,26 +651,43 @@ static int read_recv_states(void)
 	return 0;
 }
 
-int bt_ba_sink_connect(const bt_addr_le_t *addr)
+int bt_ba_scan_stop(void)
 {
 	int err;
 
-	if (addr == NULL) {
-		LOG_ERR("Address is NULL\n");
+	err = bt_le_scan_stop();
+	if (err != 0) {
+		LOG_DBG("bt_le_scan_stop failed with %d\n", err);
+		return err;
+	}
+
+	LOG_DBG("Scanning successfully stopped\n");
+	return 0;
+}
+
+int bt_ba_sink_connect(const struct brcast_snk_info *info)
+{
+	int err;
+
+	if (info == NULL) {
+		LOG_ERR("Sink info is NULL\n");
 		return -EINVAL;
 	}
 
 	err = bt_le_scan_stop();
 	if (err != 0) {
-		LOG_DBG("bt_le_scan_stop failed with %d\n", err);
+		LOG_ERR("bt_le_scan_stop failed with %d", err);
+		return err;
 	}
 
-	err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, BT_BAP_CONN_PARAM_RELAXED,
+	err = bt_conn_le_create(&info->addr, BT_CONN_LE_CREATE_CONN, BT_BAP_CONN_PARAM_RELAXED,
 				&broadcast_sink_conn);
 	if (err != 0) {
-		LOG_DBG("Failed creating connection (err=%u)\n", err);
-		scan_for_broadcast_sink();
+		LOG_ERR("Failed creating connection (err=%u)", err);
+		return err;
 	}
+
+	return 0;
 }
 
 int bt_ba_scan_for_sink_start(void)

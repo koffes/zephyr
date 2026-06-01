@@ -13,16 +13,24 @@
 
 #define NAME_SIZE_MAX 30
 
+struct display_callbacks {
+	void (*sink_selected)(const struct brcast_snk_info *sink_info);
+	void (*scan_pressed)(void);
+	void (*clear_pressed)(void);
+};
+
 void display_state_set(enum ba_states new_state);
 
 int display_scan_result_submit(struct brcast_snk_info sink_info);
 
 /**
  * @brief Initialize the ILI9341 display with LVGL
+
+ * @param callbacks Optional display button callbacks
  *
  * @return 0 on success, negative error code on failure
  */
-int display_init(void);
+int display_init(const struct display_callbacks *callbacks);
 
 
 #endif /* DISPLAY_H_ */

@@ -9,6 +9,7 @@
 #define NAME_LEN 30
 
 struct brcast_snk_info {
+	void *fifo_reserved;
 	sys_snode_t node;
 	char name[NAME_LEN];
 	bt_addr_le_t addr;
@@ -17,6 +18,7 @@ struct brcast_snk_info {
 };
 
 struct brcast_src_info {
+	void *fifo_reserved;
 	sys_snode_t node;
 	char name[NAME_LEN];
 	uint32_t broadcast_id;

@@ -42,7 +42,7 @@ LOG_MODULE_REGISTER(bt_ba);
 #define PA_SYNC_INTERVAL_TO_TIMEOUT_RATIO 20U /* Set the timeout relative to interval */
 /* Broadcast IDs are 24bit, so this is out of valid range */
 /* Default semaphore timeout when waiting for an action */
-#define SEM_TIMEOUT                       K_FOREVER
+#define SEM_TIMEOUT                       K_SECONDS(10)
 
 static struct bt_conn *broadcast_sink_conn;
 static uint8_t remote_recv_state_count;
@@ -400,7 +400,7 @@ static struct bt_le_scan_cb scan_callbacks = {
 	.timeout = scan_timeout_cb,
 };
 
-static void scan_for_broadcast_source(void)
+int bt_ba_scan_for_source_start(void)
 {
 	int err;
 
@@ -409,13 +409,12 @@ static void scan_for_broadcast_source(void)
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, NULL);
 	if (err != 0) {
 		LOG_DBG("Scanning failed to start (err %d)\n", err);
-		return;
+		return err;
 	}
 
 	LOG_DBG("Scanning for Broadcast Source successfully started\n");
 
-	err = k_sem_take(&sem_source_discovered, K_FOREVER);
-	__ASSERT_NO_MSG(err == 0);
+	return 0;
 }
 
 static int scan_for_broadcast_sink(void)
@@ -436,13 +435,12 @@ static int scan_for_broadcast_sink(void)
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err != 0) {
-		LOG_DBG("Failed to connect to %s %u %s\n", bt_conn_dst_str(conn), err,
+		LOG_ERR("Failed to connect to %s %u %s\n", bt_conn_dst_str(conn), err,
 			bt_hci_err_to_str(err));
 
 		bt_conn_unref(broadcast_sink_conn);
 		broadcast_sink_conn = NULL;
 
-		scan_for_broadcast_sink();
 		return;
 	}
 
@@ -471,13 +469,15 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 static void security_changed_cb(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
 {
-	ARG_UNUSED(conn);
+	if (conn != broadcast_sink_conn) {
+		return;
+	}
 
 	if (err == 0) {
-		LOG_DBG("Security level changed: %u\n", level);
+		LOG_INF("Security level changed OK: %u", level);
 		k_sem_give(&sem_security_updated);
 	} else {
-		LOG_DBG("Failed to set security level: %s(%u)\n", bt_security_err_to_str(err), err);
+		LOG_ERR("Failed to set security level: %s(%u)", bt_security_err_to_str(err), err);
 	}
 }
 
@@ -573,13 +573,13 @@ static void reset(void)
 {
 	int err;
 
-	LOG_DBG("\n\nResetting...\n\n");
+	LOG_INF("\n\nResetting...\n\n");
 
 	if (broadcast_sink_conn != NULL) {
 		err = bt_conn_disconnect(broadcast_sink_conn, BT_HCI_ERR_LOCALHOST_TERM_CONN);
 
 		if (err != 0) {
-			LOG_DBG("bt_conn_disconnect failed with %d\n", err);
+			LOG_ERR("bt_conn_disconnect failed with %d\n", err);
 		} else {
 			if (k_sem_take(&sem_sink_disconnected, SEM_TIMEOUT) != 0) {
 				/* This should not happen */
@@ -674,16 +674,57 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 		return -EINVAL;
 	}
 
+	k_sem_reset(&sem_security_updated);
+
 	err = bt_le_scan_stop();
 	if (err != 0) {
 		LOG_ERR("bt_le_scan_stop failed with %d", err);
 		return err;
 	}
 
+	LOG_INF("The value of broadcast_sink_conn before connection attempt: %p\n",
+		broadcast_sink_conn);
+
 	err = bt_conn_le_create(&info->addr, BT_CONN_LE_CREATE_CONN, BT_BAP_CONN_PARAM_RELAXED,
 				&broadcast_sink_conn);
 	if (err != 0) {
 		LOG_ERR("Failed creating connection (err=%u)", err);
+		return err;
+	}
+
+	LOG_INF("Connecting to Broadcast Sink at %s. Waiting..", bt_addr_le_str(&info->addr));
+
+	err = k_sem_take(&sem_sink_connected, SEM_TIMEOUT);
+	if (err != 0) {
+		LOG_ERR("Failed to take sem_sink_connected (err %d)\n", err);
+		return err;
+	}
+
+	LOG_INF("Connected to Broadcast Sink at %s\n", bt_addr_le_str(&info->addr));
+
+	err = bt_conn_set_security(broadcast_sink_conn, BT_SECURITY_L2);
+	if (err != 0) {
+		LOG_ERR("Failed to set security: %d", err);
+		return err;
+	}
+
+	LOG_INF("Waiting for security update from %s\n", bt_addr_le_str(&info->addr));
+
+	err = k_sem_take(&sem_security_updated, SEM_TIMEOUT);
+	if (err != 0) {
+		LOG_ERR("Failed to take sem_security_updated (err %d)\n", err);
+		return err;
+	}
+
+	err = bt_bap_broadcast_assistant_discover(broadcast_sink_conn);
+	if (err != 0) {
+		LOG_ERR("Failed to discover BASS on the sink (err %d)", err);
+		return err;
+	}
+
+	err = read_recv_states();
+	if (err != 0) {
+		LOG_ERR("Failed to read receive states\n");
 		return err;
 	}
 

@@ -34,7 +34,6 @@ static lv_obj_t *screen_sinks_btn[BROADCAST_SINKS_MAX];
 static lv_obj_t *screen_sinks_scan_run_btn;
 static lv_obj_t *screen_sinks_clear_btn;
 static lv_obj_t *screen_all_status_label;
-;
 
 static lv_style_t style_btn_trans;
 static lv_style_t style_btn_default;
@@ -225,7 +224,7 @@ int display_scan_result_submit(struct brcast_snk_info sink_info)
 	}
 }
 
-static const struct brcast_snk_info *sink_from_button_index(uint8_t sink_index)
+static struct brcast_snk_info *sink_from_button_index(uint8_t sink_index)
 {
 	if (sink_index >= brcast_snk_heap.size) {
 		return NULL;
@@ -236,8 +235,9 @@ static const struct brcast_snk_info *sink_from_button_index(uint8_t sink_index)
 
 static void btn_sink_select(lv_event_t *event)
 {
+	__ASSERT(app_callbacks.sink_selected != NULL, "Sink selected callback is not set");
 	int device = (int)(uintptr_t)lv_event_get_user_data(event);
-	const struct brcast_snk_info *sink_info = sink_from_button_index((uint8_t)device);
+	struct brcast_snk_info *sink_info = sink_from_button_index((uint8_t)device);
 	LOG_INF("Button event: %d", device);
 
 	app_callbacks.sink_selected(sink_info);
@@ -247,30 +247,26 @@ static void btn_clear(lv_event_t *event)
 {
 	struct brcast_snk_info removed_item;
 	ARG_UNUSED(event);
+	__ASSERT(app_callbacks.clear_pressed != NULL, "Clear button callback is not set");
 
 	while (min_heap_pop(&brcast_snk_heap, &removed_item)) {
 	}
 
 	LOG_INF("Clear event: all items removed");
-
-	if (app_callbacks.clear_pressed != NULL) {
-		app_callbacks.clear_pressed();
-	}
+	app_callbacks.clear_pressed();
 }
 
 static void btn_scan(lv_event_t *event)
 {
 	ARG_UNUSED(event);
+	__ASSERT(app_callbacks.scan_pressed != NULL, "Scan button callback is not set");
 
 	if (screen_all_status_label != NULL) {
 		lv_label_set_text(screen_all_status_label, "Scanning");
 	}
 
 	LOG_INF("Scan start/stop event:");
-
-	if (app_callbacks.scan_pressed != NULL) {
-		app_callbacks.scan_pressed();
-	}
+	app_callbacks.scan_pressed();
 }
 
 void display_state_set(enum ba_states new_state)
@@ -302,7 +298,6 @@ int display_init(const struct display_callbacks *callbacks)
 	} else {
 		(void)memset(&app_callbacks, 0, sizeof(app_callbacks));
 	}
-
 	brcast_snk_heap.size = 0U;
 
 	display_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));

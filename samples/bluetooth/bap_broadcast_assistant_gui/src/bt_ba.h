@@ -17,6 +17,8 @@ int bt_ba_scan_stop(void);
 
 int bt_ba_scan_for_sink_start(void);
 
+int bt_ba_scan_for_source_start(void);
+
 int bt_ba_init(const struct bt_ba_callbacks *callbacks);
 
 #endif /* BT_BA_H_ */

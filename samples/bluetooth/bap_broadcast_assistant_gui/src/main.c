@@ -9,20 +9,18 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main);
 
-static void on_sink_button_pressed(const struct brcast_snk_info *sink_info)
+K_FIFO_DEFINE(fifo_brcast_sink);
+
+static void on_sink_button_pressed(struct brcast_snk_info *sink_info)
 {
-	int err;
 	if (sink_info == NULL) {
 		LOG_WRN("Sink button pressed for empty row");
 		return;
 	}
 
-	LOG_INF("Sink selected: %s", sink_info->name);
+	k_fifo_put(&fifo_brcast_sink, sink_info);
 
-	err = bt_ba_sink_connect(sink_info);
-	if (err != 0) {
-		LOG_ERR("Failed to connect to sink (err %d)\n", err);
-	}
+	LOG_INF("Sink selected: %s", sink_info->name);
 }
 
 static void on_scan_button_pressed(void)
@@ -121,6 +119,16 @@ int main(void)
 	LOG_INF("Scan for sink started");
 
 	while (1) {
-		k_sleep(K_SECONDS(1));
+		k_sleep(K_MSEC(100));
+
+		struct brcast_snk_info *sink_info = k_fifo_get(&fifo_brcast_sink, K_NO_WAIT);
+
+		if (sink_info != NULL) {
+			LOG_INF("Processing selected sink: %s", sink_info->name);
+			err = bt_ba_sink_connect(sink_info);
+			if (err != 0) {
+				LOG_ERR("Failed to connect to sink (err %d)\n", err);
+			}
+		}
 	}
 }

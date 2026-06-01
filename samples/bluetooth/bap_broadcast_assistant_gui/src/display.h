@@ -14,7 +14,7 @@
 #define NAME_SIZE_MAX 30
 
 struct display_callbacks {
-	void (*sink_selected)(const struct brcast_snk_info *sink_info);
+	void (*sink_selected)(struct brcast_snk_info *sink_info);
 	void (*scan_pressed)(void);
 	void (*clear_pressed)(void);
 };

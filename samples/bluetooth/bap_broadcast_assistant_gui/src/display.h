@@ -15,6 +15,7 @@
 
 struct display_callbacks {
 	void (*sink_selected)(struct brcast_snk_info *sink_info);
+	void (*src_selected)(struct brcast_src_info *src_info);
 	void (*scan_pressed)(void);
 	void (*clear_pressed)(void);
 };

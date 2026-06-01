@@ -69,18 +69,13 @@ static K_SEM_DEFINE(sem_pa_synced, 0U, 1U);
 static K_SEM_DEFINE(sem_pa_sync_terminted, 0U, 1U);
 static K_SEM_DEFINE(sem_received_base_subgroups, 0U, 1U);
 
-enum ba_states {
-	STATE_IDLE,
-	STATE_SCANNING_SINK,
-	STATE_CONNECTING_SINK,
-	STATE_SECURITY_CHANGED,
-	STATE_DISCOVERING_BASS,
-	STATE_DISCOVERED_BASS,
-	STATE_READING_RECV_STATES,
-	STATE_SCANNING_SOURCE,
-	STATE_PA_SYNCING,
-	STATE_ADDING_SOURCE,
-} state = STATE_IDLE;
+struct scan_recv_info {
+	char name[NAME_LEN];
+	char broadcast_name[NAME_LEN];
+	uint32_t broadcast_id;
+	bool has_bass;
+	bool has_pacs;
+};
 
 static bool device_found(struct bt_data *data, void *user_data)
 {
@@ -90,7 +85,7 @@ static bool device_found(struct bt_data *data, void *user_data)
 	switch (data->type) {
 	case BT_DATA_NAME_SHORTENED:
 	case BT_DATA_NAME_COMPLETE:
-		memcpy(sr_info->bt_name, data->data, MIN(data->data_len, NAME_LEN - 1));
+		memcpy(sr_info->name, data->data, MIN(data->data_len, NAME_LEN - 1));
 		return true;
 	case BT_DATA_BROADCAST_NAME:
 		memcpy(sr_info->broadcast_name, data->data, MIN(data->data_len, NAME_LEN - 1));
@@ -330,16 +325,16 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 
 		if (sr_info.broadcast_id != BT_BAP_INVALID_BROADCAST_ID) {
 			LOG_DBG("Broadcast Source Found:\n");
-			LOG_DBG("  BT Name:        %s\n", sr_info.bt_name);
+			LOG_DBG("  BT Name:        %s\n", sr_info.name);
 			LOG_DBG("  Broadcast Name: %s\n", sr_info.broadcast_name);
 			LOG_DBG("  Broadcast ID:   0x%06x\n\n", sr_info.broadcast_id);
 
-			app_callbacks.scan_result_source(sr_info);
+			// app_callbacks.scan_result_source(sr_info);
 
 #if defined(CONFIG_SELECT_SOURCE_NAME)
 			if (strlen(CONFIG_SELECT_SOURCE_NAME) > 0U) {
 				/* Compare names with CONFIG_SELECT_SOURCE_NAME */
-				if (is_substring(CONFIG_SELECT_SOURCE_NAME, sr_info.bt_name) ||
+				if (is_substring(CONFIG_SELECT_SOURCE_NAME, sr_info.name) ||
 				    is_substring(CONFIG_SELECT_SOURCE_NAME,
 						 sr_info.broadcast_name)) {
 					LOG_DBG("Match found for '%s'\n",
@@ -385,10 +380,12 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 		bt_data_parse(ad, device_found, (void *)&sr_info);
 
 		if (sr_info.has_bass && sr_info.has_pacs) {
-			// LOG_INF("Broadcast Sink Found:\n");
-			LOG_INF_RATELIMIT("  BT Name:        %s\n", sr_info.bt_name);
+			LOG_INF_RATELIMIT("  BT Name:        %s\n", sr_info.name);
+			struct brcast_snk_info sink_info = {0};
+			memcpy(sink_info.name, sr_info.name, sizeof(sr_info.name));
+			bt_addr_le_copy(&sink_info.addr, info->addr);
 
-			app_callbacks.scan_result_sink(sr_info);
+			app_callbacks.scan_result_sink(sink_info);
 		}
 	}
 }

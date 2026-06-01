@@ -3,25 +3,26 @@
 
 #include "display.h"
 #include "bt_ba.h"
+#include "sr_info.h"
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main);
 
-static void on_scan_result_sink(struct scan_recv_info sr_info)
+static void on_scan_result_sink(struct brcast_snk_info snk_inf)
 {
 	int ret;
-	LOG_INF("Sink scan result: %s", sr_info.bt_name);
-	ret = display_scan_result_submit(sr_info.bt_name, strlen(sr_info.bt_name));
+	LOG_INF("Sink scan result: %s", snk_inf.name);
+	ret = display_scan_result_submit(snk_inf);
 	if (ret != 0) {
 		LOG_ERR("Failed to submit scan result (err %d)\n", ret);
 	}
 }
 
-static void on_scan_result_source(struct scan_recv_info sr_info)
+static void on_scan_result_source(struct brcast_src_info src_info)
 {
-	LOG_INF("Source scan result: bt='%s' broadcast='%s' id=0x%06x", sr_info.bt_name,
-		sr_info.broadcast_name, sr_info.broadcast_id);
+	LOG_INF("Source scan result: bt='%s' broadcast='%s' id=0x%06x", src_info.name,
+		src_info.name, src_info.broadcast_id);
 }
 
 void set_cpu_to_128mhz(void)
@@ -61,13 +62,19 @@ int main(void)
 
 	LOG_INF("Broadcast Assistant started");
 
-	err = display_scan_result_submit("TESSST", strlen("TESSST"));
+	struct brcast_snk_info dummy_1 = {0};
+	memcpy(dummy_1.name, "Dummy1", sizeof("Dummy1"));
+
+	err = display_scan_result_submit(dummy_1);
 	if (err != 0) {
 		LOG_DBG("Failed to submit scan result (err %d)\n", err);
 		return 0;
 	}
 
-	err = display_scan_result_submit("ABCDEFGHIJKLMONPQRS", strlen("ABCDEFGHIJKLMONPQRS"));
+	struct brcast_snk_info dummy_2 = {0};
+	memcpy(dummy_2.name, "Dummy2", sizeof("Dummy2"));
+
+	err = display_scan_result_submit(dummy_2);
 	if (err != 0) {
 		LOG_DBG("Failed to submit scan result (err %d)\n", err);
 		return 0;

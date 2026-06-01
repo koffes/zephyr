@@ -9,26 +9,13 @@
 
 #include <stdint.h>
 #include <zephyr/sys/slist.h>
+#include "sr_info.h"
 
 #define NAME_SIZE_MAX 30
 
-struct brcast_snk_info {
-	sys_snode_t node;
-	char name[NAME_SIZE_MAX];
-	uint64_t last_seen;
-	bool update;
-};
+void display_state_set(enum ba_states new_state);
 
-enum display_state {
-	STATE_IDLE,
-	STATE_SCANNING_FOR_SINK,
-	STATE_CONNECTING_TO_SINK,
-	STATE_CONNECTED_TO_SINK,
-};
-
-void display_state_set(enum display_state new_state);
-
-int display_scan_result_submit(char *name, uint32_t name_len);
+int display_scan_result_submit(struct brcast_snk_info sink_info);
 
 /**
  * @brief Initialize the ILI9341 display with LVGL

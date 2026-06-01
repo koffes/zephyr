@@ -15,6 +15,8 @@
 #include <zephyr/sys/util.h>
 #include <lvgl.h>
 
+#include "sr_info.h"
+
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(display);
@@ -169,34 +171,27 @@ static void gui_update_timer_handler(struct k_timer *dummy)
 
 K_TIMER_DEFINE(gui_update_timer, gui_update_timer_handler, NULL);
 
-int display_scan_result_submit(char *name, uint32_t name_len)
+int display_scan_result_submit(struct brcast_snk_info sink_info)
 {
+	int ret;
 	uint64_t time_now = k_uptime_get();
 	struct brcast_snk_info *brcast_snk_info_loc;
-	struct brcast_snk_info new_item = {0};
 	struct brcast_snk_info removed_item;
 	size_t found_idx = 0U;
-	size_t copy_len = MIN(name_len, NAME_SIZE_MAX - 1);
-	int ret;
 
 	/* Update existing device */
 	brcast_snk_info_loc =
-		min_heap_find(&brcast_snk_heap, brcast_snk_name_match, name, &found_idx);
+		min_heap_find(&brcast_snk_heap, brcast_snk_name_match, sink_info.name, &found_idx);
 	if (brcast_snk_info_loc != NULL) {
 		brcast_snk_info_loc->last_seen = time_now;
 		brcast_snk_info_loc->update = true;
-		LOG_INF("Updated existing device: %s", name);
+		LOG_INF("Updated existing device: %s", sink_info.name);
 		return 0;
 	}
 
-	memcpy(new_item.name, name, copy_len);
-	new_item.name[copy_len] = '\0';
-	new_item.last_seen = time_now;
-	new_item.update = true;
-
-	ret = min_heap_push(&brcast_snk_heap, &new_item);
+	ret = min_heap_push(&brcast_snk_heap, &sink_info);
 	if (ret == 0) {
-		LOG_INF("Added new device: %s", name);
+		LOG_INF("Added new device: %s", sink_info.name);
 		return 0;
 	}
 
@@ -214,15 +209,15 @@ int display_scan_result_submit(char *name, uint32_t name_len)
 		}
 
 		if (min_heap_remove(&brcast_snk_heap, oldest_idx, &removed_item) &&
-		    min_heap_push(&brcast_snk_heap, &new_item) == 0) {
-			LOG_INF("Replaced oldest device: %s", name);
+		    min_heap_push(&brcast_snk_heap, &sink_info) == 0) {
+			LOG_INF("Replaced oldest device: %s", sink_info.name);
 			return 0;
 		}
 
-		LOG_ERR("Failed to replace oldest device: %s", name);
+		LOG_ERR("Failed to replace oldest device: %s", sink_info.name);
 		return -ENOMEM;
 	} else {
-		LOG_ERR("No available slot for new device: %s", name);
+		LOG_ERR("No available slot for new device: %s", sink_info.name);
 		return -ENOENT;
 	}
 }
@@ -256,7 +251,7 @@ static void btn_scan(lv_event_t *event)
 	LOG_INF("Scan start/stop event:");
 }
 
-void display_state_set(enum display_state new_state)
+void display_state_set(enum ba_states new_state)
 {
 
 	switch (new_state) {

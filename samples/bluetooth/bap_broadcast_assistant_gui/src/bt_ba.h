@@ -19,6 +19,8 @@ int bt_ba_scan_for_sink_start(void);
 
 int bt_ba_scan_for_source_start(void);
 
+int bt_ba_source_sync_and_transfer(const struct brcast_src_info *info);
+
 int bt_ba_init(const struct bt_ba_callbacks *callbacks);
 
 #endif /* BT_BA_H_ */

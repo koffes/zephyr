@@ -22,6 +22,9 @@ struct brcast_src_info {
 	sys_snode_t node;
 	char name[NAME_LEN];
 	uint32_t broadcast_id;
+	bt_addr_le_t addr;
+	uint8_t sid;
+	uint16_t pa_interval;
 	uint64_t last_seen;
 	bool update;
 };
@@ -35,7 +38,7 @@ enum ba_states {
 	STATE_DISCOVERING_BASS,
 	STATE_DISCOVERED_BASS,
 	STATE_READING_RECV_STATES,
-	STATE_SCANNING_SOURCE,
+	STATE_SCANNING_FOR_SOURCE,
 	STATE_PA_SYNCING,
 	STATE_ADDING_SOURCE,
 };

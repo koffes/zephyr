@@ -46,10 +46,6 @@ LOG_MODULE_REGISTER(bt_ba);
 
 static struct bt_conn *broadcast_sink_conn;
 static uint8_t remote_recv_state_count;
-static uint32_t selected_broadcast_id;
-static uint8_t selected_sid;
-static uint16_t selected_pa_interval;
-static bt_addr_le_t selected_addr;
 static struct bt_le_per_adv_sync *pa_sync;
 static uint8_t received_base[UINT8_MAX];
 static size_t received_base_size;
@@ -248,28 +244,6 @@ static bool add_pa_sync_base_subgroup_cb(const struct bt_bap_base_subgroup *subg
 	return true;
 }
 
-static bool is_substring(const char *substr, const char *str)
-{
-	const size_t str_len = strlen(str);
-	const size_t sub_str_len = strlen(substr);
-
-	if (sub_str_len > str_len) {
-		return false;
-	}
-
-	for (size_t pos = 0U; pos < str_len; pos++) {
-		if (pos + sub_str_len > str_len) {
-			return false;
-		}
-
-		if (strncasecmp(substr, &str[pos], sub_str_len) == 0) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 static uint16_t interval_to_sync_timeout(uint16_t pa_interval)
 {
 	uint16_t pa_timeout;
@@ -293,22 +267,8 @@ static uint16_t interval_to_sync_timeout(uint16_t pa_interval)
 	return pa_timeout;
 }
 
-static int pa_sync_create(void)
-{
-	struct bt_le_per_adv_sync_param create_params = {0};
-
-	bt_addr_le_copy(&create_params.addr, &selected_addr);
-	create_params.options = BT_LE_PER_ADV_SYNC_OPT_FILTER_DUPLICATE;
-	create_params.sid = selected_sid;
-	create_params.skip = PA_SYNC_SKIP;
-	create_params.timeout = interval_to_sync_timeout(selected_pa_interval);
-
-	return bt_le_per_adv_sync_create(&create_params, &pa_sync);
-}
-
 static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf_simple *ad)
 {
-	int err;
 	struct scan_recv_info sr_info = {0};
 
 	if (scanning_for_broadcast_source) {
@@ -324,50 +284,18 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 		bt_data_parse(ad, device_found, (void *)&sr_info);
 
 		if (sr_info.broadcast_id != BT_BAP_INVALID_BROADCAST_ID) {
-			LOG_DBG("Broadcast Source Found:\n");
-			LOG_DBG("  BT Name:        %s\n", sr_info.name);
-			LOG_DBG("  Broadcast Name: %s\n", sr_info.broadcast_name);
-			LOG_DBG("  Broadcast ID:   0x%06x\n\n", sr_info.broadcast_id);
+			LOG_INF("  Broadcast Name: %s\n", sr_info.broadcast_name);
+			LOG_INF("  Broadcast ID:   0x%06x\n\n", sr_info.broadcast_id);
 
-			// app_callbacks.scan_result_source(sr_info);
+			struct brcast_src_info source_info = {0};
+			memcpy(source_info.name, sr_info.broadcast_name,
+			       sizeof(sr_info.broadcast_name));
+			source_info.broadcast_id = sr_info.broadcast_id;
+			source_info.sid = info->sid;
+			source_info.pa_interval = info->interval;
+			bt_addr_le_copy(&source_info.addr, info->addr);
 
-#if defined(CONFIG_SELECT_SOURCE_NAME)
-			if (strlen(CONFIG_SELECT_SOURCE_NAME) > 0U) {
-				/* Compare names with CONFIG_SELECT_SOURCE_NAME */
-				if (is_substring(CONFIG_SELECT_SOURCE_NAME, sr_info.name) ||
-				    is_substring(CONFIG_SELECT_SOURCE_NAME,
-						 sr_info.broadcast_name)) {
-					LOG_DBG("Match found for '%s'\n",
-						CONFIG_SELECT_SOURCE_NAME);
-				} else {
-					LOG_DBG("'%s' not found in names\n\n",
-						CONFIG_SELECT_SOURCE_NAME);
-					return;
-				}
-			}
-#endif /* CONFIG_SELECT_SOURCE_NAME */
-
-			err = bt_le_scan_stop();
-			if (err != 0) {
-				LOG_DBG("bt_le_scan_stop failed with %d\n", err);
-			}
-
-			/* TODO: Add support for syncing to the PA and parsing the BASE
-			 * in order to obtain the right subgroup information to send to
-			 * the sink when adding a broadcast source (see in main function below).
-			 */
-
-			LOG_DBG("Selecting Broadcast ID: 0x%06x\n", sr_info.broadcast_id);
-
-			selected_broadcast_id = sr_info.broadcast_id;
-			selected_sid = info->sid;
-			selected_pa_interval = info->interval;
-			bt_addr_le_copy(&selected_addr, info->addr);
-
-			k_sem_give(&sem_source_discovered);
-
-			LOG_DBG("Attempting to PA sync to the broadcaster with id 0x%06X\n",
-				selected_broadcast_id);
+			app_callbacks.scan_result_source(source_info);
 		}
 	} else {
 		/* Scan for and connect to Broadcast Sink */
@@ -540,8 +468,7 @@ static void pa_sync_synced_cb(struct bt_le_per_adv_sync *sync,
 	ARG_UNUSED(info);
 
 	if (sync == pa_sync) {
-		LOG_DBG("PA sync %p synced for broadcast sink with broadcast ID 0x%06X\n", sync,
-			selected_broadcast_id);
+		LOG_INF("PA sync synced for broadcast sink");
 
 		k_sem_give(&sem_pa_synced);
 	}
@@ -607,11 +534,6 @@ static void reset(void)
 		}
 		__ASSERT_NO_MSG(err == 0);
 	}
-
-	selected_broadcast_id = BT_BAP_INVALID_BROADCAST_ID;
-	selected_sid = 0U;
-	selected_pa_interval = 0U;
-	(void)memset(&selected_addr, 0, sizeof(selected_addr));
 
 	k_sem_reset(&sem_source_discovered);
 	k_sem_reset(&sem_sink_connected);
@@ -731,6 +653,83 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 	return 0;
 }
 
+int bt_ba_source_sync_and_transfer(const struct brcast_src_info *info)
+{
+	int err;
+	LOG_DBG("Attempting to PA sync to the broadcaster with id 0x%06X\n", info->broadcast_id);
+
+	struct bt_bap_broadcast_assistant_add_src_param param = {0};
+
+	err = bt_le_scan_stop();
+	if (err != 0) {
+		LOG_ERR("Failed to stop scanning (err %d)\n", err);
+		return err;
+	}
+
+	struct bt_le_per_adv_sync_param create_params = {0};
+
+	bt_addr_le_copy(&create_params.addr, &info->addr);
+	create_params.options = BT_LE_PER_ADV_SYNC_OPT_FILTER_DUPLICATE;
+	create_params.sid = info->sid;
+	create_params.skip = PA_SYNC_SKIP;
+	create_params.timeout = interval_to_sync_timeout(info->pa_interval);
+
+	err = bt_le_per_adv_sync_create(&create_params, &pa_sync);
+	if (err != 0) {
+		LOG_ERR("Could not create Broadcast PA sync: %d\n", err);
+		return err;
+	}
+
+	LOG_INF("Waiting for PA synced\n");
+	err = k_sem_take(&sem_pa_synced, SEM_TIMEOUT);
+	if (err != 0) {
+		LOG_ERR("Failed to take sem_pa_synced (err %d)\n", err);
+		return err;
+	}
+
+	memset(bass_subgroups, 0, sizeof(bass_subgroups));
+	bt_addr_le_copy(&param.addr, &info->addr);
+	param.adv_sid = info->sid;
+	param.pa_interval = info->pa_interval;
+	param.broadcast_id = info->broadcast_id;
+	param.pa_sync = true;
+	param.subgroups = bass_subgroups;
+
+	/* Wait to receive subgroups */
+	err = k_sem_take(&sem_received_base_subgroups, K_FOREVER);
+	if (err != 0) {
+		LOG_ERR("Failed to take sem_received_base_subgroups (err %d)\n", err);
+		return err;
+	}
+
+	err = k_mutex_lock(&base_store_mutex, K_FOREVER);
+	if (err != 0) {
+		LOG_ERR("Failed to lock base_store_mutex (err %d)\n", err);
+		return err;
+	}
+
+	err = bt_bap_base_foreach_subgroup((const struct bt_bap_base *)received_base,
+					   add_pa_sync_base_subgroup_cb, &param);
+	err = k_mutex_unlock(&base_store_mutex);
+	if (err != 0) {
+		LOG_ERR("Failed to unlock base_store_mutex (err %d)\n", err);
+		return err;
+	}
+
+	if (err != 0) {
+		LOG_ERR("Could not add BASE to params %d\n", err);
+		return err;
+	}
+
+	err = bt_bap_broadcast_assistant_add_src(broadcast_sink_conn, &param);
+	if (err != 0) {
+		LOG_ERR("Failed to add source: %d\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 int bt_ba_scan_for_sink_start(void)
 {
 	scan_for_broadcast_sink();
@@ -837,9 +836,10 @@ int bt_ba_init(const struct bt_ba_callbacks *callbacks)
 
 	// 	err = k_mutex_lock(&base_store_mutex, K_FOREVER);
 	// 	__ASSERT_NO_MSG(err == 0);
-	// 	err = bt_bap_base_foreach_subgroup((const struct bt_bap_base *)received_base,
-	// 					   add_pa_sync_base_subgroup_cb, &param);
-	// 	err = k_mutex_unlock(&base_store_mutex);
+	// 	err = bt_bap_base_foreach_subgroup((const struct bt_bap_base
+	// *)received_base,
+	// add_pa_sync_base_subgroup_cb, &param); 	err =
+	// k_mutex_unlock(&base_store_mutex);
 	// 	__ASSERT_NO_MSG(err == 0);
 
 	// 	if (err != 0) {

@@ -10,6 +10,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/kernel.h>
+#include "lvgl_zephyr.h"
 
 #include <zephyr/sys/min_heap.h>
 #include <zephyr/sys/util.h>
@@ -36,13 +37,14 @@ static lv_obj_t *screen_srcs_name[DEVICES_MAX];
 static lv_obj_t *screen_srcs_since_seen[DEVICES_MAX];
 static lv_obj_t *screen_srcs_btn[DEVICES_MAX];
 
-static lv_obj_t *screen_snks_scan_run_btn;
-static lv_obj_t *screen_snks_clear_btn;
+static lv_obj_t *screen_snks_status_label;
+static lv_obj_t *screen_srcs_status_label;
 static lv_obj_t *screen_all_status_label;
 
 static lv_style_t style_btn_trans;
 static lv_style_t style_btn_default;
 static struct display_callbacks app_callbacks;
+static const struct device *display_dev_ref;
 
 static int name_cmp(const void *a, const void *b)
 {
@@ -58,6 +60,14 @@ static bool brcast_snk_name_match(const void *node, const void *other)
 	const char *name = other;
 
 	return strcmp(sink->name, name) == 0;
+}
+
+static bool brcast_src_name_match(const void *node, const void *other)
+{
+	const struct brcast_src_info *src = node;
+	const char *name = other;
+
+	return strcmp(src->name, name) == 0;
 }
 
 MIN_HEAP_DEFINE_STATIC(brcast_snk_heap, DEVICES_MAX, sizeof(struct brcast_snk_info),
@@ -146,7 +156,6 @@ static void page_snks_draw(void)
 		sprintf(buf, "----------------");
 		lv_label_set_text(screen_snks_name[row], buf);
 		sprintf(buf, "------");
-
 		lv_label_set_text(screen_snks_since_seen[row], buf);
 	}
 }
@@ -171,32 +180,26 @@ static void page_srcs_draw(void)
 		sprintf(buf, "***************");
 		lv_label_set_text(screen_srcs_name[row], buf);
 		sprintf(buf, "*******");
-
 		lv_label_set_text(screen_srcs_since_seen[row], buf);
 	}
 }
 
 static void timer_worker(struct k_work *work)
 {
+	lvgl_lock();
 	if (lv_scr_act() == screen_snks) {
 		page_snks_draw();
-		/* Keep top action buttons refreshed even when only row labels change. */
-		if (screen_snks_scan_run_btn != NULL) {
-			lv_obj_invalidate(screen_snks_scan_run_btn);
-		}
-		if (screen_snks_clear_btn != NULL) {
-			lv_obj_invalidate(screen_snks_clear_btn);
-		}
-		if (screen_all_status_label != NULL) {
-			lv_obj_invalidate(screen_all_status_label);
-		}
+		lv_obj_invalidate(screen_all_status_label);
+
 	} else if (lv_scr_act() == screen_srcs) {
 		page_srcs_draw();
+		lv_obj_invalidate(screen_all_status_label);
 	} else {
 		LOG_ERR("Unknown screen active.");
 	}
 
 	lv_timer_handler();
+	lvgl_unlock();
 }
 
 K_WORK_DEFINE(timer_work, timer_worker);
@@ -208,7 +211,7 @@ static void gui_update_timer_handler(struct k_timer *dummy)
 
 K_TIMER_DEFINE(gui_update_timer, gui_update_timer_handler, NULL);
 
-int display_scan_result_submit(struct brcast_snk_info sink_info)
+int display_scan_result_snk_submit(struct brcast_snk_info snk_info)
 {
 	int ret;
 	uint64_t time_now = k_uptime_get();
@@ -218,17 +221,17 @@ int display_scan_result_submit(struct brcast_snk_info sink_info)
 
 	/* Update existing device */
 	brcast_snk_info_loc =
-		min_heap_find(&brcast_snk_heap, brcast_snk_name_match, sink_info.name, &found_idx);
+		min_heap_find(&brcast_snk_heap, brcast_snk_name_match, snk_info.name, &found_idx);
 	if (brcast_snk_info_loc != NULL) {
 		brcast_snk_info_loc->last_seen = time_now;
 		brcast_snk_info_loc->update = true;
-		LOG_DBG("Updated existing device: %s", sink_info.name);
+		LOG_DBG("Updated existing device: %s", snk_info.name);
 		return 0;
 	}
 
-	ret = min_heap_push(&brcast_snk_heap, &sink_info);
+	ret = min_heap_push(&brcast_snk_heap, &snk_info);
 	if (ret == 0) {
-		LOG_INF("Added new device: %s", sink_info.name);
+		LOG_INF("Added new device: %s", snk_info.name);
 		return 0;
 	}
 
@@ -246,15 +249,66 @@ int display_scan_result_submit(struct brcast_snk_info sink_info)
 		}
 
 		if (min_heap_remove(&brcast_snk_heap, oldest_idx, &removed_item) &&
-		    min_heap_push(&brcast_snk_heap, &sink_info) == 0) {
-			LOG_INF("Replaced oldest device: %s", sink_info.name);
+		    min_heap_push(&brcast_snk_heap, &snk_info) == 0) {
+			LOG_INF("Replaced oldest device: %s", snk_info.name);
 			return 0;
 		}
 
-		LOG_ERR("Failed to replace oldest device: %s", sink_info.name);
+		LOG_ERR("Failed to replace oldest device: %s", snk_info.name);
 		return -ENOMEM;
 	} else {
-		LOG_ERR("No available slot for new device: %s", sink_info.name);
+		LOG_ERR("No available slot for new device: %s", snk_info.name);
+		return -ENOENT;
+	}
+}
+
+int display_scan_result_src_submit(struct brcast_src_info src_info)
+{
+	int ret;
+	uint64_t time_now = k_uptime_get();
+	struct brcast_src_info *brcast_src_info_loc;
+	struct brcast_src_info removed_item;
+	size_t found_idx = 0U;
+
+	/* Update existing device */
+	brcast_src_info_loc =
+		min_heap_find(&brcast_src_heap, brcast_src_name_match, src_info.name, &found_idx);
+	if (brcast_src_info_loc != NULL) {
+		brcast_src_info_loc->last_seen = time_now;
+		brcast_src_info_loc->update = true;
+		LOG_DBG("Updated existing device: %s", src_info.name);
+		return 0;
+	}
+
+	ret = min_heap_push(&brcast_src_heap, &src_info);
+	if (ret == 0) {
+		LOG_INF("Added new device: %s", src_info.name);
+		return 0;
+	}
+
+	/* Heap full: remove oldest seen source and insert the new one */
+	if (brcast_src_heap.size > 0U) {
+		size_t oldest_idx = 0U;
+		uint64_t oldest_time = UINT64_MAX;
+
+		for (size_t i = 0U; i < brcast_src_heap.size; i++) {
+			brcast_src_info_loc = min_heap_get_element(&brcast_src_heap, i);
+			if (brcast_src_info_loc->last_seen < oldest_time) {
+				oldest_time = brcast_src_info_loc->last_seen;
+				oldest_idx = i;
+			}
+		}
+
+		if (min_heap_remove(&brcast_src_heap, oldest_idx, &removed_item) &&
+		    min_heap_push(&brcast_src_heap, &src_info) == 0) {
+			LOG_INF("Replaced oldest device: %s", src_info.name);
+			return 0;
+		}
+
+		LOG_ERR("Failed to replace oldest device: %s", src_info.name);
+		return -ENOMEM;
+	} else {
+		LOG_ERR("No available slot for new device: %s", src_info.name);
 		return -ENOENT;
 	}
 }
@@ -279,12 +333,12 @@ static struct brcast_src_info *src_from_button_index(uint8_t src_index)
 
 static void btn_sink_select(lv_event_t *event)
 {
-	__ASSERT(app_callbacks.sink_selected != NULL, "Sink selected callback is not set");
+	__ASSERT(app_callbacks.snk_selected != NULL, "Sink selected callback is not set");
 	int device = (int)(uintptr_t)lv_event_get_user_data(event);
 	struct brcast_snk_info *sink_info = sink_from_button_index((uint8_t)device);
 	LOG_INF("Button event: %d", device);
 
-	app_callbacks.sink_selected(sink_info);
+	app_callbacks.snk_selected(sink_info);
 }
 
 static void btn_src_select(lv_event_t *event)
@@ -297,48 +351,68 @@ static void btn_src_select(lv_event_t *event)
 	app_callbacks.src_selected(src_info);
 }
 
-static void btn_clear(lv_event_t *event)
+static void sinks_screen_set(void)
 {
-	struct brcast_snk_info removed_item;
-	ARG_UNUSED(event);
-	__ASSERT(app_callbacks.clear_pressed != NULL, "Clear button callback is not set");
 
-	while (min_heap_pop(&brcast_snk_heap, &removed_item)) {
+	display_hw_clear_white(display_dev_ref);
+
+	lv_scr_load(screen_snks);
+	page_snks_draw();
+	lv_obj_invalidate(screen_snks);
+	for (int i = 0; i < DEVICES_MAX; i++) {
+		lv_obj_invalidate(screen_snks_name[i]);
+		lv_obj_invalidate(screen_snks_since_seen[i]);
+		lv_obj_invalidate(screen_snks_btn[i]);
+
+		lv_refr_now(NULL);
 	}
-
-	LOG_INF("Clear event: all items removed");
-	app_callbacks.clear_pressed();
 }
 
-static void btn_scan(lv_event_t *event)
+static void sources_screen_set(void)
 {
-	ARG_UNUSED(event);
-	__ASSERT(app_callbacks.scan_pressed != NULL, "Scan button callback is not set");
 
-	if (screen_all_status_label != NULL) {
-		lv_label_set_text(screen_all_status_label, "Scanning");
+	display_hw_clear_white(display_dev_ref);
+
+	lv_scr_load(screen_srcs);
+	page_srcs_draw();
+	lv_obj_invalidate(screen_srcs);
+	for (int i = 0; i < DEVICES_MAX; i++) {
+		lv_obj_invalidate(screen_srcs_name[i]);
+		lv_obj_invalidate(screen_srcs_since_seen[i]);
+		lv_obj_invalidate(screen_srcs_btn[i]);
 	}
 
-	LOG_INF("Scan start/stop event:");
-	app_callbacks.scan_pressed();
+	lv_refr_now(NULL);
 }
 
 void display_state_set(enum ba_states new_state)
 {
+	lvgl_lock();
 
 	switch (new_state) {
 	case STATE_IDLE:
+		sinks_screen_set();
+		screen_all_status_label = screen_snks_status_label;
+		LOG_INF("Switched to sink screen");
 		break;
 	case STATE_SCANNING_FOR_SINK:
+
 		lv_label_set_text(screen_all_status_label, "Scan: snk");
+
 		break;
-	case STATE_CONNECTING_TO_SINK:
-		break;
-	case STATE_CONNECTED_TO_SINK:
+	case STATE_SCANNING_FOR_SOURCE:
+		sources_screen_set();
+		screen_all_status_label = screen_srcs_status_label;
+
+		lv_label_set_text(screen_all_status_label, "Scan: src");
+
+		LOG_INF("Switched to source screen");
 		break;
 	default:
 		LOG_ERR("Unknown state: %d", new_state);
 	}
+
+	lvgl_unlock();
 	return;
 }
 
@@ -347,11 +421,11 @@ int display_init(const struct display_callbacks *callbacks)
 	const struct device *display_dev;
 	int ret;
 
-	if (callbacks != NULL) {
-		app_callbacks = *callbacks;
-	} else {
-		(void)memset(&app_callbacks, 0, sizeof(app_callbacks));
-	}
+	__ASSERT(callbacks != NULL, "Display callbacks must be provided");
+
+	lvgl_lock();
+	app_callbacks = *callbacks;
+
 	brcast_snk_heap.size = 0U;
 
 	display_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
@@ -359,6 +433,7 @@ int display_init(const struct display_callbacks *callbacks)
 		LOG_ERR("Device not ready, aborting test");
 		return 0;
 	}
+	display_dev_ref = display_dev;
 
 	ret = display_blanking_off(display_dev);
 	if (ret < 0 && ret != -ENOSYS) {
@@ -384,6 +459,10 @@ int display_init(const struct display_callbacks *callbacks)
 	lv_obj_add_style(act_scr, &style_common, LV_STATE_DEFAULT);
 
 	lv_style_set_text_font(&style_common, &lv_font_montserrat_24);
+
+	/* Give source screen its own opaque white background */
+	lv_obj_set_style_bg_color(screen_srcs, lv_color_white(), LV_STATE_DEFAULT);
+	lv_obj_set_style_bg_opa(screen_srcs, LV_OPA_COVER, LV_STATE_DEFAULT);
 	lv_disp_t *disp = lv_disp_get_default();
 	int width = lv_disp_get_hor_res(disp);
 	// int height = lv_disp_get_ver_res(disp);
@@ -430,6 +509,13 @@ int display_init(const struct display_callbacks *callbacks)
 		lv_obj_add_style(screen_srcs_name[i], &style_common, 0);
 		lv_label_set_text(screen_srcs_name[i], "-");
 
+		screen_srcs_since_seen[i] = lv_label_create(screen_srcs);
+		lv_label_set_recolor(screen_srcs_since_seen[i], true);
+		lv_obj_align(screen_srcs_since_seen[i], LV_ALIGN_TOP_RIGHT, 0,
+			     (i * V_OFFSET_PIXELS) + V_OFFSET_PIXELS);
+		lv_obj_add_style(screen_srcs_since_seen[i], &style_common, 0);
+		lv_label_set_text(screen_srcs_since_seen[i], "-");
+
 		screen_snks_since_seen[i] = lv_label_create(screen_snks);
 		lv_label_set_recolor(screen_snks_since_seen[i], true);
 		lv_obj_align(screen_snks_since_seen[i], LV_ALIGN_TOP_RIGHT, 0,
@@ -438,51 +524,44 @@ int display_init(const struct display_callbacks *callbacks)
 		lv_label_set_text(screen_snks_since_seen[i], "-");
 	}
 
-	screen_snks_scan_run_btn = lv_btn_create(screen_snks);
-	lv_obj_set_size(screen_snks_scan_run_btn, TOP_BUTTON_WIDTH, V_OFFSET_PIXELS);
-	lv_obj_align(screen_snks_scan_run_btn, LV_ALIGN_TOP_LEFT, 1, 1);
-	lv_obj_add_style(screen_snks_scan_run_btn, &style_btn_default,
-			 LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_move_foreground(screen_snks_scan_run_btn);
-	lv_obj_t *scan_label = lv_label_create(screen_snks_scan_run_btn);
-	lv_label_set_text(scan_label, "Idle");
-	lv_obj_set_style_text_color(scan_label, lv_color_black(), LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_align(scan_label, LV_ALIGN_CENTER, 0, 0);
-	lv_obj_add_event_cb(screen_snks_scan_run_btn, btn_scan, LV_EVENT_PRESSED, NULL);
-
-	screen_all_status_label = lv_label_create(screen_snks);
-	lv_obj_set_size(screen_all_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
-	lv_obj_align(screen_all_status_label, LV_ALIGN_TOP_MID, 3, 0);
-	lv_obj_set_style_text_font(screen_all_status_label, &lv_font_montserrat_24,
+	screen_snks_status_label = lv_label_create(screen_snks);
+	lv_obj_set_size(screen_snks_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
+	lv_obj_align(screen_snks_status_label, LV_ALIGN_TOP_MID, 3, 0);
+	lv_obj_set_style_text_font(screen_snks_status_label, &lv_font_montserrat_24,
 				   LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_set_style_text_align(screen_all_status_label, LV_TEXT_ALIGN_CENTER,
+	lv_obj_set_style_text_align(screen_snks_status_label, LV_TEXT_ALIGN_CENTER,
 				    LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_set_style_text_color(screen_all_status_label, lv_color_black(),
+	lv_obj_set_style_text_color(screen_snks_status_label, lv_color_black(),
 				    LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_set_style_bg_opa(screen_all_status_label, LV_OPA_TRANSP,
+	lv_obj_set_style_bg_opa(screen_snks_status_label, LV_OPA_TRANSP,
 				LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_move_foreground(screen_all_status_label);
-	lv_label_set_text(screen_all_status_label, "Idle");
-	lv_obj_invalidate(screen_all_status_label);
+	lv_obj_move_foreground(screen_snks_status_label);
+	lv_label_set_text(screen_snks_status_label, "Idle");
+	lv_obj_invalidate(screen_snks_status_label);
 
-	screen_snks_clear_btn = lv_btn_create(screen_snks);
-	lv_obj_set_size(screen_snks_clear_btn, TOP_BUTTON_WIDTH, V_OFFSET_PIXELS);
-	lv_obj_align(screen_snks_clear_btn, LV_ALIGN_TOP_RIGHT, -1, 1);
-	lv_obj_add_style(screen_snks_clear_btn, &style_btn_default,
-			 LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_move_foreground(screen_snks_clear_btn);
-	lv_obj_t *clear_label = lv_label_create(screen_snks_clear_btn);
-	lv_label_set_text(clear_label, "Clear");
-	lv_obj_set_style_text_color(clear_label, lv_color_black(), LV_PART_MAIN | LV_STATE_DEFAULT);
-	lv_obj_align(clear_label, LV_ALIGN_CENTER, 0, 0);
-	lv_obj_add_event_cb(screen_snks_clear_btn, btn_clear, LV_EVENT_PRESSED, NULL);
+	screen_srcs_status_label = lv_label_create(screen_srcs);
+	lv_obj_set_size(screen_srcs_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
+	lv_obj_align(screen_srcs_status_label, LV_ALIGN_TOP_MID, 3, 0);
+	lv_obj_set_style_text_font(screen_srcs_status_label, &lv_font_montserrat_24,
+				   LV_PART_MAIN | LV_STATE_DEFAULT);
+	lv_obj_set_style_text_align(screen_srcs_status_label, LV_TEXT_ALIGN_CENTER,
+				    LV_PART_MAIN | LV_STATE_DEFAULT);
+	lv_obj_set_style_text_color(screen_srcs_status_label, lv_color_black(),
+				    LV_PART_MAIN | LV_STATE_DEFAULT);
+	lv_obj_set_style_bg_opa(screen_srcs_status_label, LV_OPA_TRANSP,
+				LV_PART_MAIN | LV_STATE_DEFAULT);
+	lv_obj_move_foreground(screen_srcs_status_label);
+	lv_label_set_text(screen_srcs_status_label, "Idle");
 
-	lv_obj_move_foreground(screen_all_status_label);
+	screen_all_status_label = screen_snks_status_label;
+
+	lv_obj_move_foreground(screen_snks_status_label);
 
 	/* Force a full initial draw so static widgets are visible before any touch input. */
-	lv_obj_invalidate(screen_snks);
-	lv_refr_now(NULL);
-	lv_timer_handler();
+
+	sinks_screen_set();
+
+	lvgl_unlock();
 	k_timer_start(&gui_update_timer, K_MSEC(100), K_MSEC(100));
 
 	LOG_INF("Display initialized");

@@ -334,6 +334,8 @@ int bt_ba_scan_for_source_start(void)
 
 	scanning_for_broadcast_source = true;
 
+	app_callbacks.state_update(STATE_SCANNING_FOR_SOURCE);
+
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, NULL);
 	if (err != 0) {
 		LOG_DBG("Scanning failed to start (err %d)\n", err);
@@ -351,6 +353,8 @@ static int scan_for_broadcast_sink(void)
 
 	scanning_for_broadcast_source = false;
 
+	app_callbacks.state_update(STATE_SCANNING_FOR_SINK);
+
 	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, NULL);
 	if (err != 0) {
 		LOG_WRN("Scanning failed to start (err %d)\n", err);
@@ -358,6 +362,7 @@ static int scan_for_broadcast_sink(void)
 	}
 
 	LOG_DBG("Scanning for Broadcast Sink successfully started\n");
+	return 0;
 }
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -542,6 +547,8 @@ static void reset(void)
 	k_sem_reset(&sem_bass_discovered);
 	k_sem_reset(&sem_pa_synced);
 	k_sem_reset(&sem_received_base_subgroups);
+
+	app_callbacks.state_update(STATE_IDLE);
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {.connected = connected,
@@ -607,6 +614,8 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 	LOG_INF("The value of broadcast_sink_conn before connection attempt: %p\n",
 		broadcast_sink_conn);
 
+	app_callbacks.state_update(STATE_CONNECTING_TO_SINK);
+
 	err = bt_conn_le_create(&info->addr, BT_CONN_LE_CREATE_CONN, BT_BAP_CONN_PARAM_RELAXED,
 				&broadcast_sink_conn);
 	if (err != 0) {
@@ -622,7 +631,11 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 		return err;
 	}
 
+	app_callbacks.state_update(STATE_CONNECTED_TO_SINK);
+
 	LOG_INF("Connected to Broadcast Sink at %s\n", bt_addr_le_str(&info->addr));
+
+	app_callbacks.state_update(STATE_SETTING_SECURITY);
 
 	err = bt_conn_set_security(broadcast_sink_conn, BT_SECURITY_L2);
 	if (err != 0) {
@@ -638,6 +651,8 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 		return err;
 	}
 
+	app_callbacks.state_update(STATE_SECURITY_CHANGED);
+
 	err = bt_bap_broadcast_assistant_discover(broadcast_sink_conn);
 	if (err != 0) {
 		LOG_ERR("Failed to discover BASS on the sink (err %d)", err);
@@ -649,6 +664,8 @@ int bt_ba_sink_connect(const struct brcast_snk_info *info)
 		LOG_ERR("Failed to read receive states\n");
 		return err;
 	}
+
+	app_callbacks.state_update(STATE_DISCOVERY_DONE);
 
 	return 0;
 }
@@ -674,6 +691,8 @@ int bt_ba_source_sync_and_transfer(const struct brcast_src_info *info)
 	create_params.skip = PA_SYNC_SKIP;
 	create_params.timeout = interval_to_sync_timeout(info->pa_interval);
 
+	app_callbacks.state_update(STATE_PER_ADV_SYNC_CREATE);
+
 	err = bt_le_per_adv_sync_create(&create_params, &pa_sync);
 	if (err != 0) {
 		LOG_ERR("Could not create Broadcast PA sync: %d\n", err);
@@ -686,6 +705,8 @@ int bt_ba_source_sync_and_transfer(const struct brcast_src_info *info)
 		LOG_ERR("Failed to take sem_pa_synced (err %d)\n", err);
 		return err;
 	}
+
+	app_callbacks.state_update(STATE_PER_ADV_SYNC_CREATED);
 
 	memset(bass_subgroups, 0, sizeof(bass_subgroups));
 	bt_addr_le_copy(&param.addr, &info->addr);
@@ -721,18 +742,29 @@ int bt_ba_source_sync_and_transfer(const struct brcast_src_info *info)
 		return err;
 	}
 
+	app_callbacks.state_update(STATE_ADDING_SOURCE);
+
 	err = bt_bap_broadcast_assistant_add_src(broadcast_sink_conn, &param);
 	if (err != 0) {
 		LOG_ERR("Failed to add source: %d\n", err);
 		return err;
 	}
 
+	app_callbacks.state_update(STATE_ADDED_SOURCE);
+
 	return 0;
 }
 
 int bt_ba_scan_for_sink_start(void)
 {
-	scan_for_broadcast_sink();
+	int err;
+	err = scan_for_broadcast_sink();
+	if (err != 0) {
+		LOG_ERR("Failed to start scan (err %d)\n", err);
+		return err;
+	}
+
+	return 0;
 }
 
 int bt_ba_init(const struct bt_ba_callbacks *callbacks)
@@ -758,105 +790,6 @@ int bt_ba_init(const struct bt_ba_callbacks *callbacks)
 	k_mutex_init(&base_store_mutex);
 
 	reset();
-
-	// while (true) {
-	// 	struct bt_bap_broadcast_assistant_add_src_param param = {0};
-
-	// 	err = k_sem_take(&sem_sink_connected, SEM_TIMEOUT);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to take sem_sink_connected (err %d)\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = bt_conn_set_security(broadcast_sink_conn, BT_SECURITY_L2);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to set security: %d\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = k_sem_take(&sem_security_updated, SEM_TIMEOUT);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to take sem_security_updated (err %d)\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = bt_bap_broadcast_assistant_discover(broadcast_sink_conn);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to discover BASS on the sink (err %d)\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = k_sem_take(&sem_bass_discovered, SEM_TIMEOUT);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to take sem_bass_discovered (err %d)\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = read_recv_states();
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to read receive states\n");
-	// 		continue;
-	// 	}
-
-	// 	/* TODO: Discover and parse the PACS on the sink and use the information
-	// 	 * when discovering and adding a source to the sink.
-	// 	 * Also, before populating the parameters to sync to the broadcast source
-	// 	 * first, parse the source BASE and determine if the sink supports the
-	// 	 * source. If not, then look for another source.
-	// 	 */
-
-	// 	scan_for_broadcast_source();
-
-	// 	LOG_DBG("Attempting to PA sync to the broadcaster with id 0x%06X\n",
-	// 		selected_broadcast_id);
-	// 	err = pa_sync_create();
-	// 	if (err != 0) {
-	// 		LOG_DBG("Could not create Broadcast PA sync: %d\n", err);
-	// 		continue;
-	// 	}
-
-	// 	LOG_DBG("Waiting for PA synced\n");
-	// 	err = k_sem_take(&sem_pa_synced, SEM_TIMEOUT);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to take sem_pa_synced (err %d)\n", err);
-	// 		continue;
-	// 	}
-
-	// 	memset(bass_subgroups, 0, sizeof(bass_subgroups));
-	// 	bt_addr_le_copy(&param.addr, &selected_addr);
-	// 	param.adv_sid = selected_sid;
-	// 	param.pa_interval = selected_pa_interval;
-	// 	param.broadcast_id = selected_broadcast_id;
-	// 	param.pa_sync = true;
-	// 	param.subgroups = bass_subgroups;
-
-	// 	/* Wait to receive subgroups */
-	// 	err = k_sem_take(&sem_received_base_subgroups, K_FOREVER);
-	// 	__ASSERT_NO_MSG(err == 0);
-
-	// 	err = k_mutex_lock(&base_store_mutex, K_FOREVER);
-	// 	__ASSERT_NO_MSG(err == 0);
-	// 	err = bt_bap_base_foreach_subgroup((const struct bt_bap_base
-	// *)received_base,
-	// add_pa_sync_base_subgroup_cb, &param); 	err =
-	// k_mutex_unlock(&base_store_mutex);
-	// 	__ASSERT_NO_MSG(err == 0);
-
-	// 	if (err != 0) {
-	// 		LOG_DBG("Could not add BASE to params %d\n", err);
-	// 		continue;
-	// 	}
-
-	// 	err = bt_bap_broadcast_assistant_add_src(broadcast_sink_conn, &param);
-	// 	if (err != 0) {
-	// 		LOG_DBG("Failed to add source: %d\n", err);
-	// 		continue;
-	// 	}
-
-	// 	/* Reset if the sink disconnects */
-	// 	err = k_sem_take(&sem_sink_disconnected, K_FOREVER);
-	// 	__ASSERT_NO_MSG(err == 0);
-	// }
 
 	return 0;
 }

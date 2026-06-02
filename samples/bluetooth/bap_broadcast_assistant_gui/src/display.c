@@ -388,29 +388,58 @@ static void sources_screen_set(void)
 void display_state_set(enum ba_states new_state)
 {
 	lvgl_lock();
+	char buf[40] = {'\0'};
 
 	switch (new_state) {
 	case STATE_IDLE:
 		sinks_screen_set();
 		screen_all_status_label = screen_snks_status_label;
-		LOG_INF("Switched to sink screen");
+		sprintf(buf, "Idle");
 		break;
 	case STATE_SCANNING_FOR_SINK:
-
-		lv_label_set_text(screen_all_status_label, "Scan: snk");
-
+		sprintf(buf, "Scan for sinks");
+		break;
+	case STATE_CONNECTING_TO_SINK:
+		sprintf(buf, "Conn to sink");
+		break;
+	case STATE_CONNECTED_TO_SINK:
+		sprintf(buf, "Conn'd to sink");
+		break;
+	case STATE_SETTING_SECURITY:
+		sprintf(buf, "Setting sec");
+		break;
+	case STATE_SECURITY_CHANGED:
+		sprintf(buf, "Sec changed");
+		break;
+	case STATE_DISCOVERY_DONE:
+		sprintf(buf, "Discover done");
 		break;
 	case STATE_SCANNING_FOR_SOURCE:
 		sources_screen_set();
 		screen_all_status_label = screen_srcs_status_label;
-
-		lv_label_set_text(screen_all_status_label, "Scan: src");
-
-		LOG_INF("Switched to source screen");
+		sprintf(buf, "Scan for srcs");
+		break;
+	case STATE_PER_ADV_SYNC_CREATE:
+		sprintf(buf, "Creating per adv sync");
+		break;
+	case STATE_PER_ADV_SYNC_CREATED:
+		sprintf(buf, "Per adv sync created");
+		break;
+	case STATE_ADDING_SOURCE:
+		sprintf(buf, "Adding src");
+		break;
+	case STATE_ADDED_SOURCE:
+		sprintf(buf, "Src added");
 		break;
 	default:
+		sprintf(buf, "Unknown state");
 		LOG_ERR("Unknown state: %d", new_state);
 	}
+
+	char steps_buf[10] = {'\0'};
+	sprintf(steps_buf, " %d/%d", new_state, STATE_STEPS_MAX - 1);
+	strcat(buf, steps_buf);
+	lv_label_set_text(screen_all_status_label, buf);
 
 	lvgl_unlock();
 	return;
@@ -525,8 +554,8 @@ int display_init(const struct display_callbacks *callbacks)
 	}
 
 	screen_snks_status_label = lv_label_create(screen_snks);
-	lv_obj_set_size(screen_snks_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
-	lv_obj_align(screen_snks_status_label, LV_ALIGN_TOP_MID, 3, 0);
+	lv_obj_set_size(screen_snks_status_label, 250, V_OFFSET_PIXELS);
+	lv_obj_align(screen_snks_status_label, LV_ALIGN_TOP_LEFT, 3, 0);
 	lv_obj_set_style_text_font(screen_snks_status_label, &lv_font_montserrat_24,
 				   LV_PART_MAIN | LV_STATE_DEFAULT);
 	lv_obj_set_style_text_align(screen_snks_status_label, LV_TEXT_ALIGN_CENTER,
@@ -540,8 +569,8 @@ int display_init(const struct display_callbacks *callbacks)
 	lv_obj_invalidate(screen_snks_status_label);
 
 	screen_srcs_status_label = lv_label_create(screen_srcs);
-	lv_obj_set_size(screen_srcs_status_label, width - (2 * TOP_BUTTON_WIDTH), V_OFFSET_PIXELS);
-	lv_obj_align(screen_srcs_status_label, LV_ALIGN_TOP_MID, 3, 0);
+	lv_obj_set_size(screen_srcs_status_label, 250, V_OFFSET_PIXELS);
+	lv_obj_align(screen_srcs_status_label, LV_ALIGN_TOP_LEFT, 3, 0);
 	lv_obj_set_style_text_font(screen_srcs_status_label, &lv_font_montserrat_24,
 				   LV_PART_MAIN | LV_STATE_DEFAULT);
 	lv_obj_set_style_text_align(screen_srcs_status_label, LV_TEXT_ALIGN_CENTER,

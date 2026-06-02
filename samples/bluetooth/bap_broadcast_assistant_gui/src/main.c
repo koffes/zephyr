@@ -58,6 +58,12 @@ static void on_scan_result_source(struct brcast_src_info src_info)
 	}
 }
 
+static void on_state_update(enum ba_states new_state)
+{
+	LOG_INF("State update: %d", new_state);
+	display_state_set(new_state);
+}
+
 void set_cpu_to_128mhz(void)
 {
 #if NRFX_CLOCK_ENABLED && (defined(CLOCK_FEATURE_HFCLK_DIVIDE_PRESENT) || NRF_CLOCK_HAS_HFCLK192M)
@@ -73,10 +79,9 @@ void set_cpu_to_128mhz(void)
 int main(void)
 {
 	int err;
-	const struct bt_ba_callbacks bt_callbacks = {
-		.scan_result_sink = on_scan_result_sink,
-		.scan_result_source = on_scan_result_source,
-	};
+	const struct bt_ba_callbacks bt_callbacks = {.scan_result_sink = on_scan_result_sink,
+						     .scan_result_source = on_scan_result_source,
+						     .state_update = on_state_update};
 	const struct display_callbacks display_callbacks = {
 		.snk_selected = on_snk_button_pressed,
 		.src_selected = on_src_button_pressed,
@@ -102,8 +107,6 @@ int main(void)
 	err = bt_ba_scan_for_sink_start();
 	if (err != 0) {
 		LOG_ERR("Failed to start scan (err %d)\n", err);
-	} else {
-		display_state_set(STATE_SCANNING_FOR_SINK);
 	}
 
 	LOG_INF("Scan for sink started");
@@ -120,7 +123,6 @@ int main(void)
 				LOG_ERR("Failed to connect to sink (err %d)\n", err);
 			}
 
-			display_state_set(STATE_SCANNING_FOR_SOURCE);
 			err = bt_ba_scan_for_source_start();
 			if (err != 0) {
 				LOG_ERR("Failed to start scan for source (err %d)\n", err);

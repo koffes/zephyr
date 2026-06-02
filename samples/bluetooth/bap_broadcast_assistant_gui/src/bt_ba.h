@@ -9,6 +9,7 @@
 struct bt_ba_callbacks {
 	void (*scan_result_sink)(const struct brcast_snk_info info);
 	void (*scan_result_source)(const struct brcast_src_info info);
+	void (*state_update)(enum ba_states new_state);
 };
 
 int bt_ba_sink_connect(const struct brcast_snk_info *info);
